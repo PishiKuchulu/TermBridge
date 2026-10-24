@@ -1,0 +1,647 @@
+package com.pishi.termbridge.ui.viewmodel
+
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.pishi.termbridge.data.HostEnvironmentRepository
+import com.pishi.termbridge.data.HostRepository
+import com.pishi.termbridge.domain.AuthType
+import com.pishi.termbridge.domain.HostProfile
+import com.pishi.termbridge.domain.wipe
+import com.pishi.termbridge.transport.HostKeyDecisionHandler
+import com.pishi.termbridge.transport.PendingTrust
+import com.pishi.termbridge.transport.RemoteEntry
+import com.pishi.termbridge.transport.RemotePath
+import com.pishi.termbridge.transport.SftpError
+import com.pishi.termbridge.transport.SftpException
+import com.pishi.termbridge.transport.SftpManager
+import com.pishi.termbridge.transport.SshConnection
+import com.pishi.termbridge.transport.SshConnectionRequest
+import com.pishi.termbridge.transport.SshTransport
+import com.pishi.termbridge.transport.SshTransportException
+import com.pishi.termbridge.transport.SshjConnection
+import java.io.OutputStream
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+enum class FilesStatus {
+    IDLE,
+    CONNECTING,
+    CONNECTED,
+    FAILED
+}
+
+data class TransferProgress(
+    val fileName: String,
+    val bytesTransferred: Long,
+    val totalBytes: Long?,
+    val direction: String // "Upload" or "Download"
+)
+
+data class FilesUiState(
+    val selectedHostId: Long? = null,
+    val status: FilesStatus = FilesStatus.IDLE,
+    val connectedHost: HostProfile? = null,
+    val currentPath: String = "/",
+    val entries: List<RemoteEntry> = emptyList(),
+    val errorMessage: String? = null,
+    val pendingTrust: PendingTrust? = null,
+    val transfer: TransferProgress? = null,
+    /** Name of an upload that conflicts with an existing entry. */
+    val uploadConflictName: String? = null,
+    /** Non-error note (e.g. working-directory fallback). Never a secret. */
+    val infoMessage: String? = null,
+    /** True when the connected host has a local SAF folder set:
+     *  downloads then write straight into it (prompt 09). */
+    val localFolderAvailable: Boolean = false
+)
+
+/**
+ * Prompt 07 file manager state.
+ *
+ * Connection model (explicit, documented): Files opens its OWN
+ * SSH connection, separate from the terminal's connection.
+ *
+ * Prompt 15 decision — KEEP SEPARATE (see
+ * docs/INTEGRATION_NOTES.md §1 for the full reasoning, and
+ * don't re-open this without it): sharing one sshj client
+ * across the activity-scoped terminal ViewModel and this
+ * destination-scoped ViewModel would need a shared lifecycle
+ * holder with reference counting, would only help when both
+ * target the same host (the second-connection path must stay
+ * anyway), and would couple failures — an SFTP disconnect
+ * could kill the terminal and vice versa. The cost of
+ * separation is one extra TCP connection and authentication
+ * when both are used; the benefit is failure isolation and
+ * the untouched prompt-05 trust/passphrase flow per
+ * connection. Disconnect on leaving the Files screen is
+ * therefore acceptable here (unlike the terminal, which is
+ * activity-scoped by an explicit prompt-06 decision).
+ *
+ * Local access is SAF only: upload sources and download
+ * destinations are user-picked URIs, never broad storage
+ * permissions, never direct file paths. Transfers stream through
+ * counting wrappers — no whole file is ever held in memory.
+ */
+class FilesViewModel(
+    private val repository: HostRepository,
+    private val environmentRepository: HostEnvironmentRepository,
+    private val contentResolver: ContentResolver
+) : ViewModel() {
+    private val transport = SshTransport(repository)
+
+    val hosts: StateFlow<List<HostProfile>> = repository.getHosts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _uiState = MutableStateFlow(FilesUiState())
+    val uiState: StateFlow<FilesUiState> = _uiState.asStateFlow()
+
+    private var connection: SshConnection? = null
+    private var sftpManager: SftpManager? = null
+    private var connectJob: Job? = null
+    private var transferJob: Job? = null
+    private var transferCancelled = false
+    private var decisionDeferred: CompletableDeferred<Boolean>? = null
+
+    // Upload conflict state, observed by the UI dialog.
+    var pendingUploadUri: Uri? = null
+        private set
+    var pendingUploadName: String? = null
+        private set
+    var pendingDownloadEntry: RemoteEntry? = null
+        private set
+
+    private val decisionHandler = object : HostKeyDecisionHandler {
+        override suspend fun decideUnknown(pending: PendingTrust): Boolean =
+            awaitDecision(pending)
+
+        override suspend fun decideChanged(pending: PendingTrust): Boolean =
+            awaitDecision(pending)
+    }
+
+    private suspend fun awaitDecision(pending: PendingTrust): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        decisionDeferred = deferred
+        _uiState.value = _uiState.value.copy(pendingTrust = pending)
+        try {
+            return deferred.await()
+        } finally {
+            decisionDeferred = null
+            if (_uiState.value.pendingTrust == pending) {
+                _uiState.value = _uiState.value.copy(pendingTrust = null)
+            }
+        }
+    }
+
+    fun selectHost(id: Long) {
+        if (_uiState.value.status != FilesStatus.CONNECTING) {
+            _uiState.value = _uiState.value.copy(selectedHostId = id, errorMessage = null)
+        }
+    }
+
+    fun answerTrust(trust: Boolean) {
+        decisionDeferred?.complete(trust)
+    }
+
+    fun connect(passphrase: String) {
+        val hostId = _uiState.value.selectedHostId ?: return
+        connectJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            status = FilesStatus.CONNECTING,
+            errorMessage = null,
+            pendingTrust = null
+        )
+        connectJob = viewModelScope.launch {
+            var credentialBytes: ByteArray? = null
+            var passphraseChars: CharArray? = null
+            try {
+                val profile = repository.getHost(hostId)
+                if (profile == null) {
+                    _uiState.value = _uiState.value.copy(
+                        status = FilesStatus.FAILED,
+                        errorMessage = "Host not found."
+                    )
+                    return@launch
+                }
+                credentialBytes = repository.loadCredential(hostId)
+                if (credentialBytes == null) {
+                    _uiState.value = _uiState.value.copy(
+                        status = FilesStatus.FAILED,
+                        errorMessage = "No credential stored for this host. Edit the host and add one."
+                    )
+                    return@launch
+                }
+                passphraseChars = if (profile.authType == AuthType.PRIVATE_KEY && passphrase.isNotEmpty()) {
+                    passphrase.toCharArray()
+                } else {
+                    null
+                }
+                val conn = transport.connect(
+                    SshConnectionRequest(
+                        profile = profile,
+                        credential = credentialBytes,
+                        passphrase = passphraseChars
+                    ),
+                    decisionHandler
+                )
+                val sshjConn = conn as? SshjConnection
+                if (sshjConn == null) {
+                    conn.disconnect()
+                    _uiState.value = _uiState.value.copy(
+                        status = FilesStatus.FAILED,
+                        errorMessage = "SFTP could not start on this connection."
+                    )
+                    return@launch
+                }
+                connection = conn
+                val manager = SftpManager(sshjConn)
+                sftpManager = manager
+                // SFTP availability is checked now, not on first
+                // listing: a server without SFTP fails here with a
+                // clear message, not later with a generic listing error.
+                withContext(Dispatchers.IO) { manager.ensureSftp() }
+                // Prompt 09: SFTP starts in the host's remote
+                // working directory ONLY when it is a POSIX-style
+                // absolute path (RemotePath normalises it). A
+                // Windows-style directory cannot be a start path
+                // here: the SFTP path dialect on Windows servers
+                // is not standardised in this app, so guessing
+                // would list the wrong place. Browsing then starts
+                // at root, honestly, not at a guessed path.
+                val envSettings = environmentRepository.getSettingsOnce(hostId)
+                val startPath = envSettings?.remoteWorkingDirectory
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { RemotePath.normalize(it) }
+                    ?: "/"
+                _uiState.value = _uiState.value.copy(
+                    status = FilesStatus.CONNECTED,
+                    connectedHost = profile,
+                    currentPath = startPath,
+                    errorMessage = null,
+                    infoMessage = null,
+                    localFolderAvailable = !envSettings?.localDirectoryUri.isNullOrBlank()
+                )
+                refreshWithStartFallback()
+            } catch (e: SshTransportException) {
+                _uiState.value = _uiState.value.copy(
+                    status = FilesStatus.FAILED,
+                    errorMessage = e.error.userMessage
+                )
+            } catch (e: SftpException) {
+                disconnect()
+                _uiState.value = _uiState.value.copy(
+                    status = FilesStatus.FAILED,
+                    errorMessage = e.error.userMessage
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    status = FilesStatus.FAILED,
+                    errorMessage = "Connection failed. Please try again."
+                )
+            } finally {
+                credentialBytes?.wipe()
+                passphraseChars?.wipe()
+            }
+        }
+    }
+
+    fun disconnect() {
+        transferJob?.cancel()
+        transferCancelled = true
+        try {
+            sftpManager?.close()
+        } catch (_: Exception) {
+        }
+        sftpManager = null
+        connection?.disconnect()
+        connection = null
+        decisionDeferred?.complete(false)
+        pendingUploadUri = null
+        pendingUploadName = null
+        pendingDownloadEntry = null
+        _uiState.value = FilesUiState(selectedHostId = _uiState.value.selectedHostId)
+    }
+
+    fun cancel() {
+        decisionDeferred?.complete(false)
+        connectJob?.cancel()
+        disconnect()
+    }
+
+    fun refresh() {
+        val manager = sftpManager ?: return
+        viewModelScope.launch {
+            try {
+                val entries = withContext(Dispatchers.IO) {
+                    manager.list(_uiState.value.currentPath)
+                }
+                _uiState.value = _uiState.value.copy(entries = entries, errorMessage = null)
+            } catch (e: SftpException) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.error.userMessage)
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = "Could not list this directory.")
+            }
+        }
+    }
+
+    /**
+     * Prompt 09 start-path fallback: if the host's working
+     * directory cannot be listed (deleted, no permission), fall
+     * back to root once and say so, instead of leaving the user
+     * on a dead path with a generic error. Root itself failing
+     * is a real error and is reported as one.
+     */
+    private fun refreshWithStartFallback() {
+        val manager = sftpManager ?: return
+        viewModelScope.launch {
+            try {
+                val entries = withContext(Dispatchers.IO) {
+                    manager.list(_uiState.value.currentPath)
+                }
+                _uiState.value = _uiState.value.copy(entries = entries, errorMessage = null)
+            } catch (_: Exception) {
+                if (_uiState.value.currentPath != "/") {
+                    _uiState.value = _uiState.value.copy(
+                        currentPath = "/",
+                        infoMessage = "Working directory not available — started at root."
+                    )
+                    refresh()
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Could not list this directory."
+                    )
+                }
+            }
+        }
+    }
+
+    fun navigateInto(entry: RemoteEntry) {
+        if (!entry.isDirectory) return
+        _uiState.value = _uiState.value.copy(currentPath = entry.path)
+        refresh()
+    }
+
+    fun navigateUp() {
+        val parent = RemotePath.parent(_uiState.value.currentPath)
+        _uiState.value = _uiState.value.copy(currentPath = parent)
+        refresh()
+    }
+
+    fun mkdir(name: String) {
+        if (!RemotePath.isValidName(name)) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Invalid directory name.")
+            return
+        }
+        val manager = sftpManager ?: return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { manager.mkdir(_uiState.value.currentPath, name) }
+                refresh()
+            } catch (e: SftpException) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.error.userMessage)
+            }
+        }
+    }
+
+    fun rename(entry: RemoteEntry, newName: String) {
+        if (!RemotePath.isValidName(newName)) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Invalid name.")
+            return
+        }
+        val manager = sftpManager ?: return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { manager.rename(entry.path, newName) }
+                refresh()
+            } catch (e: SftpException) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.error.userMessage)
+            }
+        }
+    }
+
+    fun delete(entry: RemoteEntry) {
+        val manager = sftpManager ?: return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { manager.delete(entry.path) }
+                refresh()
+            } catch (e: SftpException) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = if (entry.isDirectory) {
+                        e.error.userMessage + " Empty the directory first — recursive delete is not supported."
+                    } else {
+                        e.error.userMessage
+                    }
+                )
+            }
+        }
+    }
+
+    /** Upload entry point from the SAF picker. Checks conflicts first. */
+    fun onUploadPicked(uri: Uri) {
+        val (name, _) = queryDisplayNameAndSize(uri)
+        val safeName = name ?: "upload"
+        pendingUploadUri = uri
+        pendingUploadName = safeName
+        // Conflict is resolved by the UI dialog when the name
+        // already exists in the current listing; otherwise upload now.
+        if (_uiState.value.entries.any { it.name == safeName }) {
+            // UI observes uploadConflictName and shows the dialog;
+            // the actual upload starts from resolveUploadConflict().
+            _uiState.value = _uiState.value.copy(uploadConflictName = safeName)
+        } else {
+            startUpload(uri, safeName)
+        }
+    }
+
+    fun resolveUploadConflict(overwrite: Boolean, rename: Boolean) {
+        val uri = pendingUploadUri ?: return
+        val baseName = pendingUploadName ?: return
+        pendingUploadUri = null
+        pendingUploadName = null
+        _uiState.value = _uiState.value.copy(uploadConflictName = null)
+        if (!overwrite && !rename) return
+        if (overwrite) {
+            startUpload(uri, baseName)
+        } else {
+            val existing = _uiState.value.entries.map { it.name }.toSet()
+            var candidate = baseName
+            var counter = 1
+            while (candidate in existing) {
+                val dot = baseName.lastIndexOf('.')
+                candidate = if (dot > 0) {
+                    baseName.substring(0, dot) + " ($counter)" + baseName.substring(dot)
+                } else {
+                    "$baseName ($counter)"
+                }
+                counter++
+            }
+            startUpload(uri, candidate)
+        }
+    }
+
+    private fun startUpload(uri: Uri, remoteName: String) {
+        pendingUploadUri = null
+        pendingUploadName = null
+        val manager = sftpManager ?: return
+        val remotePath = RemotePath.join(_uiState.value.currentPath, remoteName) ?: return
+        transferCancelled = false
+        transferJob = viewModelScope.launch {
+            try {
+                val input = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)
+                } ?: run {
+                    _uiState.value = _uiState.value.copy(errorMessage = "Could not open the selected file.")
+                    return@launch
+                }
+                val total = queryDisplayNameAndSize(uri).second
+                withContext(Dispatchers.IO) {
+                    input.use { stream ->
+                        manager.upload(
+                            stream,
+                            remotePath,
+                            onProgress = { bytes ->
+                                _uiState.value = _uiState.value.copy(
+                                    transfer = TransferProgress(remoteName, bytes, total, "Upload")
+                                )
+                            },
+                            isCancelled = { transferCancelled }
+                        )
+                    }
+                }
+                _uiState.value = _uiState.value.copy(transfer = null, errorMessage = null)
+                refresh()
+            } catch (e: SftpException) {
+                _uiState.value = _uiState.value.copy(
+                    transfer = null,
+                    errorMessage = e.error.userMessage
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    transfer = null,
+                    errorMessage = "Upload failed. Please try again."
+                )
+            }
+        }
+    }
+
+    /** Download entry point: the UI opens a SAF CreateDocument picker. */
+    fun prepareDownload(entry: RemoteEntry) {
+        pendingDownloadEntry = entry
+    }
+
+    fun onDownloadDestinationPicked(uri: Uri) {
+        val entry = pendingDownloadEntry ?: return
+        pendingDownloadEntry = null
+        startDownload(entry, uri)
+    }
+
+    /**
+     * Prompt 09: download straight into the connected host's local
+     * SAF folder, without a picker. The folder URI comes from the
+     * host's environment settings (picked with OpenDocumentTree
+     * and persistently permitted by the environment screen). If
+     * the folder cannot be written (permission lost, provider
+     * gone), the error names the folder problem and the user can
+     * still download via the picker — the picker path is untouched.
+     * Returns nothing to the UI; progress and errors flow through
+     * uiState, like every other transfer here.
+     */
+    fun downloadToLocalFolder(entry: RemoteEntry) {
+        val hostId = _uiState.value.connectedHost?.id ?: return
+        viewModelScope.launch {
+            val settings = environmentRepository.getSettingsOnce(hostId)
+            val treeUriString = settings?.localDirectoryUri?.takeIf { it.isNotBlank() }
+            if (treeUriString == null) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "No local folder is set for this host."
+                )
+                return@launch
+            }
+            val docUri = try {
+                withContext(Dispatchers.IO) {
+                    val treeUri = Uri.parse(treeUriString)
+                    val rootDoc = DocumentsContract.buildDocumentUriUsingTree(
+                        treeUri,
+                        DocumentsContract.getTreeDocumentId(treeUri)
+                    )
+                    DocumentsContract.createDocument(
+                        contentResolver,
+                        rootDoc,
+                        "application/octet-stream",
+                        entry.name
+                    )
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (docUri == null) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "Could not write to the host local folder. " +
+                        "Check the folder in the host environment settings, " +
+                        "or download with the file picker instead."
+                )
+                return@launch
+            }
+            startDownload(entry, docUri)
+        }
+    }
+
+    /** Shared download flow: picker destination and local-folder
+     *  destination differ only in how the URI was obtained. */
+    private fun startDownload(entry: RemoteEntry, uri: Uri) {
+        val manager = sftpManager ?: return
+        transferCancelled = false
+        transferJob = viewModelScope.launch {
+            var output: OutputStream? = null
+            try {
+                output = withContext(Dispatchers.IO) {
+                    contentResolver.openOutputStream(uri)
+                } ?: run {
+                    _uiState.value = _uiState.value.copy(errorMessage = "Could not open the destination file.")
+                    return@launch
+                }
+                withContext(Dispatchers.IO) {
+                    output.use { stream ->
+                        manager.download(
+                            entry.path,
+                            stream,
+                            expectedSize = if (entry.size >= 0) entry.size else null,
+                            onProgress = { bytes ->
+                                _uiState.value = _uiState.value.copy(
+                                    transfer = TransferProgress(entry.name, bytes, entry.size, "Download")
+                                )
+                            },
+                            isCancelled = { transferCancelled }
+                        )
+                    }
+                }
+                _uiState.value = _uiState.value.copy(transfer = null, errorMessage = null)
+            } catch (e: SftpException) {
+                // Best-effort partial-file cleanup on failure/cancel.
+                try {
+                    DocumentsContract.deleteDocument(contentResolver, uri)
+                } catch (_: Exception) {
+                }
+                _uiState.value = _uiState.value.copy(
+                    transfer = null,
+                    errorMessage = e.error.userMessage
+                )
+            } catch (_: Exception) {
+                try {
+                    DocumentsContract.deleteDocument(contentResolver, uri)
+                } catch (_: Exception) {
+                }
+                _uiState.value = _uiState.value.copy(
+                    transfer = null,
+                    errorMessage = "Download failed. Please try again."
+                )
+            } finally {
+                try {
+                    output?.close()
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    fun cancelTransfer() {
+        transferCancelled = true
+        transferJob?.cancel()
+        _uiState.value = _uiState.value.copy(transfer = null)
+    }
+
+    private fun queryDisplayNameAndSize(uri: Uri): Pair<String?, Long?> {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return Pair(null, null)
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                val name = if (nameIndex >= 0) cursor.getString(nameIndex) else null
+                val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    cursor.getLong(sizeIndex)
+                } else {
+                    null
+                }
+                Pair(name, size)
+            } ?: Pair(null, null)
+        } catch (_: Exception) {
+            Pair(null, null)
+        }
+    }
+
+    override fun onCleared() {
+        try {
+            sftpManager?.close()
+        } catch (_: Exception) {
+        }
+        connection?.disconnect()
+        super.onCleared()
+    }
+}
+
+class FilesViewModelFactory(
+    private val repository: HostRepository,
+    private val environmentRepository: HostEnvironmentRepository,
+    private val contentResolver: ContentResolver
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(FilesViewModel::class.java)) {
+            return FilesViewModel(repository, environmentRepository, contentResolver) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}

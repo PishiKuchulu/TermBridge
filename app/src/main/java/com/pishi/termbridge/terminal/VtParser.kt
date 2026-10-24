@@ -1,0 +1,421 @@
+package com.pishi.termbridge.terminal
+
+/**
+ * One terminal cell. Colour codes are ANSI numbers: -1 = default,
+ * 0–7 standard, 8–15 bright. Bold is a flag, not a colour. The UI
+ * maps these numbers to actual colours; the parser never picks a
+ * Compose colour, so it stays UI-independent and JVM-testable.
+ */
+data class TerminalCell(
+    val char: Char = ' ',
+    val fg: Int = -1,
+    val bg: Int = -1,
+    val bold: Boolean = false
+)
+
+data class TerminalSnapshot(
+    /** Scrollback lines followed by visible screen lines. */
+    val lines: List<List<TerminalCell>>,
+    val cursorRow: Int,
+    val cursorCol: Int,
+    val scrollbackCount: Int
+)
+
+private enum class ParserState {
+    GROUND,
+    ESCAPE,
+    CSI,
+    OSC
+}
+
+/**
+ * A scoped, own VT parser (ADR-04). Supported, and tested:
+ * printable chars, CR, LF, backspace, tab, bell (ignored),
+ * CSI cursor moves (A/B/C/D/H/f/d/G), erase in display (J) and
+ * line (K), SGR colours/bold/reset (m), save/restore cursor (s/u,
+ * ESC 7/8), and the alternate screen (CSI ?1049h / ?1049l,
+ * prompt 14 — this is what makes full-screen apps such as vim,
+ * less, and htop usable: they draw on a separate screen, and
+ * exiting restores the shell's screen exactly). Everything else
+ * — including OSC sequences, other private modes (CSI ? ...),
+ * and 256/true-colour SGR — is consumed and ignored, never
+ * rendered as garbage text.
+ * See docs/TERMINAL_LIMITS.md for the full list.
+ *
+ * Alternate-screen semantics, kept deliberately close to a real
+ * terminal: entering saves the main screen grid, the cursor, and
+ * the saved-cursor slot, and switches to a blank screen;
+ * scrolling while on the alternate screen discards lines at the
+ * top instead of adding them to scrollback (an app's transient
+ * output is not shell history); exiting restores the main screen
+ * exactly. Entering while already on the alternate screen, and
+ * exiting while not on it, are both no-ops — a second enter must
+ * never clobber the saved main screen.
+ *
+ * Scrollback is capped: [maxScrollback] lines, oldest dropped
+ * first. Total memory is therefore bounded by
+ * (maxScrollback + rows) lines, never by the amount of output.
+ *
+ * Resize does NOT reflow: lines are truncated/padded to the new
+ * width, the screen is rebuilt at the new height, scrollback is
+ * kept (truncated to the new width). Reflow is a documented
+ * limitation, not a silent bug.
+ */
+class VtParser(
+    initialCols: Int,
+    initialRows: Int,
+    private val maxScrollback: Int = 1000
+) {
+    var cols: Int = initialCols
+        private set
+    var rows: Int = initialRows
+        private set
+
+    private var screen: MutableList<MutableList<TerminalCell>> = newScreen()
+    private val scrollback: MutableList<List<TerminalCell>> = mutableListOf()
+    private var cursorRow = 0
+    private var cursorCol = 0
+    private var savedRow = 0
+    private var savedCol = 0
+
+    // Prompt 14 alternate screen: null = on the main screen.
+    // Non-null = on the alternate screen, holding the saved main
+    // screen (grid + cursor + saved-cursor slot) for restore.
+    private var savedMainScreen: MutableList<MutableList<TerminalCell>>? = null
+    private var savedMainCursorRow = 0
+    private var savedMainCursorCol = 0
+    private var savedMainSavedRow = 0
+    private var savedMainSavedCol = 0
+
+    /** True while full-screen apps draw on the alternate screen. */
+    val onAlternateScreen: Boolean get() = savedMainScreen != null
+
+    private var fg = -1
+    private var bg = -1
+    private var bold = false
+
+    private var state = ParserState.GROUND
+    private val csiParams = StringBuilder()
+    private var csiPrivate = false
+
+    private fun newScreen(): MutableList<MutableList<TerminalCell>> {
+        return MutableList(rows) { MutableList(cols) { TerminalCell() } }
+    }
+
+    private fun blankLine(): MutableList<TerminalCell> =
+        MutableList(cols) { TerminalCell() }
+
+    fun feed(text: String) {
+        for (ch in text) {
+            when (state) {
+                ParserState.GROUND -> ground(ch)
+                ParserState.ESCAPE -> escape(ch)
+                ParserState.CSI -> csi(ch)
+                ParserState.OSC -> {
+                    if (ch == '\u0007') state = ParserState.GROUND
+                }
+            }
+        }
+    }
+
+    private fun ground(ch: Char) {
+        when (ch) {
+            '\u001B' -> state = ParserState.ESCAPE
+            '\r' -> cursorCol = 0
+            '\n' -> lineFeed()
+            '\b' -> if (cursorCol > 0) cursorCol--
+            '\t' -> cursorCol = ((cursorCol / 8) + 1) * 8
+                .coerceAtMost(cols - 1)
+            '\u0007', '\u0000' -> Unit // Bell and NUL: ignored.
+            else -> {
+                if (ch.code >= 0x20 && ch.code != 0x7F) {
+                    putChar(ch)
+                }
+            }
+        }
+    }
+
+    private fun escape(ch: Char) {
+        when (ch) {
+            '[' -> {
+                state = ParserState.CSI
+                csiParams.clear()
+                csiPrivate = false
+            }
+            ']' -> state = ParserState.OSC
+            '7' -> {
+                savedRow = cursorRow
+                savedCol = cursorCol
+                state = ParserState.GROUND
+            }
+            '8' -> {
+                cursorRow = savedRow.coerceIn(0, rows - 1)
+                cursorCol = savedCol.coerceIn(0, cols - 1)
+                state = ParserState.GROUND
+            }
+            'c' -> {
+                reset()
+                state = ParserState.GROUND
+            }
+            'M' -> {
+                // Reverse index: move up, scrolling down at the top.
+                if (cursorRow == 0) {
+                    screen.add(0, blankLine())
+                    // Bottom line scrolls off and is discarded — it
+                    // is not scrollback (scrollback is top history).
+                    screen.removeAt(screen.size - 1)
+                } else {
+                    cursorRow--
+                }
+                state = ParserState.GROUND
+            }
+            else -> state = ParserState.GROUND
+        }
+    }
+
+    private fun csi(ch: Char) {
+        when {
+            ch == '?' && csiParams.isEmpty() -> csiPrivate = true
+            ch.code in 0x30..0x3F -> csiParams.append(ch) // Params + intermediates.
+            ch.code in 0x40..0x7E -> {
+                if (!csiPrivate) {
+                    executeCsi(ch, parseParams())
+                } else {
+                    executePrivate(ch, parseParams())
+                }
+                // Other private modes (e.g. ?25 cursor
+                // visibility) are consumed and ignored.
+                state = ParserState.GROUND
+            }
+            else -> state = ParserState.GROUND
+        }
+    }
+
+    /**
+     * Private-mode finals. Only ?1049 (alternate screen) is
+     * acted on; every other private mode is ignored, as before.
+     * The parameter list may carry several modes at once
+     * (e.g. ?1049;25h); only 1049 matters here.
+     */
+    private fun executePrivate(final: Char, params: List<Int>) {
+        if (1049 !in params) return
+        when (final) {
+            'h' -> {
+                if (savedMainScreen != null) return // Already there: no-op.
+                savedMainScreen = screen
+                savedMainCursorRow = cursorRow
+                savedMainCursorCol = cursorCol
+                savedMainSavedRow = savedRow
+                savedMainSavedCol = savedCol
+                screen = newScreen()
+                cursorRow = 0
+                cursorCol = 0
+                savedRow = 0
+                savedCol = 0
+            }
+            'l' -> {
+                val main = savedMainScreen ?: return // Not there: no-op.
+                screen = main
+                cursorRow = savedMainCursorRow.coerceIn(0, rows - 1)
+                cursorCol = savedMainCursorCol.coerceIn(0, cols - 1)
+                savedRow = savedMainSavedRow
+                savedCol = savedMainSavedCol
+                savedMainScreen = null
+            }
+            else -> Unit
+        }
+    }
+
+    private fun parseParams(): List<Int> {
+        if (csiParams.isEmpty()) return emptyList()
+        return csiParams.split(';').map { it.toIntOrNull() ?: 0 }
+    }
+
+    private fun param(params: List<Int>, index: Int, default: Int): Int {
+        val value = params.getOrNull(index) ?: 0
+        return if (value == 0) default else value
+    }
+
+    private fun executeCsi(final: Char, params: List<Int>) {
+        when (final) {
+            'A' -> cursorRow = (cursorRow - param(params, 0, 1)).coerceAtLeast(0)
+            'B' -> cursorRow = (cursorRow + param(params, 0, 1)).coerceAtMost(rows - 1)
+            'C' -> cursorCol = (cursorCol + param(params, 0, 1)).coerceAtMost(cols - 1)
+            'D' -> cursorCol = (cursorCol - param(params, 0, 1)).coerceAtLeast(0)
+            'H', 'f' -> {
+                cursorRow = (param(params, 0, 1) - 1).coerceIn(0, rows - 1)
+                cursorCol = (param(params, 1, 1) - 1).coerceIn(0, cols - 1)
+            }
+            'd' -> cursorRow = (param(params, 0, 1) - 1).coerceIn(0, rows - 1)
+            'G' -> cursorCol = (param(params, 0, 1) - 1).coerceIn(0, cols - 1)
+            'J' -> when (param(params, 0, 0)) {
+                0 -> {
+                    eraseLineFrom(cursorRow, cursorCol)
+                    for (r in cursorRow + 1 until rows) screen[r] = blankLine()
+                }
+                1 -> {
+                    for (r in 0 until cursorRow) screen[r] = blankLine()
+                    eraseLineTo(cursorRow, cursorCol)
+                }
+                2 -> screen = newScreen()
+                3 -> {
+                    screen = newScreen()
+                    scrollback.clear()
+                }
+            }
+            'K' -> when (param(params, 0, 0)) {
+                0 -> eraseLineFrom(cursorRow, cursorCol)
+                1 -> eraseLineTo(cursorRow, cursorCol)
+                2 -> screen[cursorRow] = blankLine()
+            }
+            'm' -> applySgr(if (params.isEmpty()) listOf(0) else params)
+            's' -> {
+                savedRow = cursorRow
+                savedCol = cursorCol
+            }
+            'u' -> {
+                cursorRow = savedRow.coerceIn(0, rows - 1)
+                cursorCol = savedCol.coerceIn(0, cols - 1)
+            }
+            // All other CSI finals are ignored, not rendered.
+            else -> Unit
+        }
+    }
+
+    private fun eraseLineFrom(row: Int, col: Int) {
+        for (c in col until cols) screen[row][c] = TerminalCell()
+    }
+
+    private fun eraseLineTo(row: Int, col: Int) {
+        for (c in 0..col.coerceAtMost(cols - 1)) screen[row][c] = TerminalCell()
+    }
+
+    private fun applySgr(params: List<Int>) {
+        var i = 0
+        while (i < params.size) {
+            when (val p = params[i]) {
+                0 -> {
+                    fg = -1
+                    bg = -1
+                    bold = false
+                }
+                1 -> bold = true
+                22 -> bold = false
+                in 30..37 -> fg = p - 30
+                39 -> fg = -1
+                in 40..47 -> bg = p - 40
+                49 -> bg = -1
+                in 90..97 -> fg = p - 90 + 8
+                in 100..107 -> bg = p - 100 + 8
+                // 38/48 extended colours: consume their arguments
+                // (38;5;n or 38;2;r;g;b) and ignore the colour.
+                38, 48 -> {
+                    val mode = params.getOrNull(i + 1) ?: 0
+                    i += if (mode == 2) 4 else 2
+                }
+                else -> Unit
+            }
+            i++
+        }
+    }
+
+    private fun putChar(ch: Char) {
+        if (cursorCol >= cols) {
+            cursorCol = 0
+            lineFeed()
+        }
+        screen[cursorRow][cursorCol] = TerminalCell(ch, fg, bg, bold)
+        cursorCol++
+    }
+
+    private fun lineFeed() {
+        if (cursorRow == rows - 1) {
+            val top = screen.removeAt(0)
+            if (savedMainScreen == null) {
+                // Main screen: the scrolled line becomes history.
+                // Alternate screen: it is discarded — an app's
+                // transient output is not shell history.
+                scrollback.add(top)
+                trimScrollback()
+            }
+            screen.add(blankLine())
+        } else {
+            cursorRow++
+        }
+    }
+
+    private fun trimScrollback() {
+        while (scrollback.size > maxScrollback) {
+            scrollback.removeAt(0)
+        }
+    }
+
+    private fun reset() {
+        screen = newScreen()
+        // A full reset leaves the alternate screen too: the saved
+        // main screen is discarded, not restored from stale state.
+        savedMainScreen = null
+        scrollback.clear()
+        cursorRow = 0
+        cursorCol = 0
+        fg = -1
+        bg = -1
+        bold = false
+    }
+
+    /** Truncate/pad one grid to the new size, without reflow. */
+    private fun resizeGrid(
+        grid: List<List<TerminalCell>>,
+        newCols: Int,
+        newRows: Int
+    ): MutableList<MutableList<TerminalCell>> {
+        return MutableList(newRows) { r ->
+            val old = grid.getOrNull(r)
+            if (old == null) {
+                MutableList(newCols) { TerminalCell() }
+            } else {
+                MutableList(newCols) { c -> old.getOrNull(c) ?: TerminalCell() }
+            }
+        }
+    }
+
+    fun resize(newCols: Int, newRows: Int) {
+        if (newCols <= 0 || newRows <= 0) return
+        val oldScreen = screen
+        val oldScrollback = scrollback.toList()
+        val oldMain = savedMainScreen
+        cols = newCols
+        rows = newRows
+        screen = resizeGrid(oldScreen, newCols, newRows)
+        if (oldMain != null) {
+            // Resize the saved main screen too, so exiting the
+            // alternate screen after a rotation does not restore
+            // a grid of the old size.
+            savedMainScreen = resizeGrid(oldMain, newCols, newRows)
+            savedMainCursorRow = savedMainCursorRow.coerceIn(0, rows - 1)
+            savedMainCursorCol = savedMainCursorCol.coerceIn(0, cols - 1)
+        }
+        scrollback.clear()
+        scrollback.addAll(oldScrollback.map { line ->
+            List(cols) { c -> line.getOrNull(c) ?: TerminalCell() }
+        })
+        cursorRow = cursorRow.coerceIn(0, rows - 1)
+        cursorCol = cursorCol.coerceIn(0, cols - 1)
+    }
+
+    fun snapshot(): TerminalSnapshot {
+        val lines = ArrayList<List<TerminalCell>>(scrollback.size + screen.size)
+        lines.addAll(scrollback)
+        lines.addAll(screen)
+        return TerminalSnapshot(
+            lines = lines,
+            cursorRow = scrollback.size + cursorRow,
+            cursorCol = cursorCol,
+            scrollbackCount = scrollback.size
+        )
+    }
+}
+
+/** Render a snapshot line as plain text (for tests and diagnostics). */
+fun List<TerminalCell>.asText(): String =
+    buildString { for (cell in this) append(cell.char) }.trimEnd()

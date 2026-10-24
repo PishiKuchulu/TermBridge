@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fail-closed network security: no cleartext traffic by default.
+     SSH itself is not HTTP and is unaffected by this config; this
+     file governs any HTTP(S) the app might ever make. A cleartext
+     exception, if ever needed, must be justified in its own prompt
+     and scoped to a single host — never a global cleartext flag. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

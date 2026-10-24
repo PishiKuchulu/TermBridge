@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TermBridge</string>
+
+    <!-- Navigation labels -->
+    <string name="nav_hosts">Hosts</string>
+    <string name="nav_files">Files</string>
+    <string name="nav_commands">Commands</string>
+    <string name="nav_desktop">Desktop</string>
+    <string name="nav_settings">Settings</string>
+    <string name="action_back">Back</string>
+    <string name="action_add_host">Add host</string>
+    <string name="action_advanced">Advanced connections</string>
+    <string name="action_session_preview">Open connection</string>
+    <string name="action_diagnostics">Diagnostics</string>
+    <string name="action_about">About and licenses</string>
+
+    <!-- Shared shell wording: every unimplemented feature says so plainly. -->
+    <string name="shell_banner">Navigation shell only — not implemented yet.</string>
+    <string name="shell_unavailable">Unavailable</string>
+
+    <!-- Hosts -->
+    <string name="hosts_title">Hosts</string>
+    <string name="hosts_empty_title">No hosts yet</string>
+    <string name="hosts_empty_body">Host profiles arrive in the next phase. Nothing here connects to a server yet, and no account or sign-in is required to use local profiles.</string>
+    <string name="hosts_note">When host profiles exist, tapping a host opens its session. Until then, the session screen below is a labelled preview only.</string>
+
+    <!-- Host form -->
+    <string name="host_form_title">Add host</string>
+    <string name="host_form_edit_title">Edit host</string>
+    <string name="host_form_note_real">Host profiles are stored on this device only. Credentials are encrypted with the device keystore and never stored in plain text.</string>
+    <string name="field_auth_type">Authentication</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_private_key">Private key</string>
+    <string name="field_password">Password</string>
+    <string name="field_password_hint">Leave blank on edit to keep the stored password</string>
+    <string name="field_private_key">Private key (PEM)</string>
+    <string name="field_private_key_hint">Paste the PEM private key here</string>
+    <string name="field_passphrase">Key passphrase (optional)</string>
+    <string name="field_passphrase_hint">Only for encrypted private keys</string>
+    <string name="passphrase_not_stored_note">The passphrase is never stored. It will be asked again when you connect.</string>
+    <string name="field_notes">Notes (optional)</string>
+    <string name="field_notes_hint">e.g. Production web server</string>
+    <string name="field_tags">Tags (optional)</string>
+    <string name="field_tags_hint">e.g. prod, web</string>
+    <string name="action_edit_host">Edit host</string>
+    <string name="action_duplicate_host">Duplicate host</string>
+    <string name="action_delete_host">Delete host</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="delete_host_title">Delete this host?</string>
+    <string name="delete_host_body">Delete %1$s? Its stored credential will be deleted too. This cannot be undone.</string>
+    <string name="field_host_name">Host name</string>
+    <string name="field_host_name_hint">e.g. Home server</string>
+    <string name="field_hostname">Hostname or IP address</string>
+    <string name="field_hostname_hint">e.g. 192.168.1.10</string>
+    <string name="field_port">Port</string>
+    <string name="field_port_hint">22</string>
+    <string name="field_username">Username</string>
+    <string name="field_username_hint">e.g. admin</string>
+    <string name="action_save">Save</string>
+
+    <!-- Session -->
+    <string name="session_title">Session</string>
+    <string name="session_select_host">Select a host to connect to</string>
+    <string name="session_connect">Connect</string>
+    <string name="session_disconnect">Disconnect</string>
+    <string name="session_connecting">Connecting…</string>
+    <string name="session_connected_to">Connected to %1$s</string>
+    <string name="session_no_hosts_title">No hosts yet</string>
+    <string name="session_no_hosts_body">Add a host first, then return here to connect to it.</string>
+    <string name="session_passphrase_label">Key passphrase (if encrypted)</string>
+    <string name="session_passphrase_hint">Leave blank if your key has no passphrase</string>
+    <string name="trust_dialog_title_unknown">Unknown host key</string>
+    <string name="trust_dialog_title_changed">Host key changed!</string>
+    <string name="trust_dialog_body_unknown">This server has never been seen before. Only trust it if you expected this fingerprint — for example, from the server administrator.</string>
+    <string name="trust_dialog_body_changed">This server presents a different key than the one previously trusted. This can mean the server was reinstalled — or that someone is intercepting the connection. Only trust it if you have verified the new fingerprint another way.</string>
+    <string name="trust_endpoint_label">Server: %1$s</string>
+    <string name="trust_fingerprint_label">Fingerprint: %1$s</string>
+    <string name="trust_key_type_label">Key type: %1$s</string>
+    <string name="trust_stored_label">Previously trusted: %1$s</string>
+    <string name="action_trust">Trust</string>
+    <string name="action_reject">Reject</string>
+    <string name="terminal_input_hint">Type here — keys go to the shell as you type</string>
+    <string name="action_paste">Paste</string>
+    <string name="action_keyboard">Keyboard</string>
+    <string name="action_send">Send</string>
+    <string name="paste_dialog_title">Send pasted text?</string>
+    <string name="paste_dialog_body">The following text will be sent to the shell exactly as shown, including any newlines. Only send it if you trust it. Text: %1$s</string>
+
+    <!-- Files -->
+    <string name="files_title">Files</string>
+    <string name="files_sftp_note">File browsing uses SFTP, which only works where the server offers an SFTP subsystem. It is not universal file access to any Windows machine.</string>
+    <string name="files_current_path">Path: %1$s</string>
+    <string name="files_up">Up</string>
+    <string name="files_refresh">Refresh</string>
+    <string name="files_upload">Upload</string>
+    <string name="files_new_folder">New folder</string>
+    <string name="files_download">Download</string>
+    <string name="files_rename">Rename</string>
+    <string name="files_delete">Delete</string>
+    <string name="files_directory">Directory</string>
+    <string name="files_empty_dir">This directory is empty.</string>
+    <string name="rename_dialog_title">Rename</string>
+    <string name="rename_dialog_hint">New name</string>
+    <string name="mkdir_dialog_title">New folder</string>
+    <string name="mkdir_dialog_hint">Folder name</string>
+    <string name="action_create">Create</string>
+    <string name="action_rename">Rename</string>
+    <string name="delete_file_title">Delete this entry?</string>
+    <string name="delete_file_body">Delete %1$s? This cannot be undone. A non-empty directory cannot be deleted here.</string>
+    <string name="conflict_dialog_title">Name already exists</string>
+    <string name="conflict_dialog_body">A file named %1$s already exists in this directory. Overwrite it, or upload under a new name?</string>
+    <string name="action_overwrite">Overwrite</string>
+    <string name="action_rename_auto">Upload with new name</string>
+
+    <!-- Commands -->
+    <string name="commands_title">Commands</string>
+    <string name="commands_no_buttons_title">No command buttons yet</string>
+    <string name="commands_no_buttons_body">Create a button for the selected host. Buttons are stored per host and never run when created, selected, or when a screen opens.</string>
+    <string name="commands_select_host">Select a host to manage its command buttons</string>
+    <string name="commands_add_button">Add command button</string>
+    <string name="commands_edit_button_title">Edit command button</string>
+    <string name="commands_add_button_title">Add command button</string>
+    <string name="commands_field_label">Label</string>
+    <string name="commands_field_label_hint">e.g. Check disk space</string>
+    <string name="commands_field_category">Category (optional)</string>
+    <string name="commands_field_category_hint">e.g. Diagnostics</string>
+    <string name="commands_field_mode">Mode</string>
+    <string name="commands_mode_insert">Insert only — place text in the terminal, do not run it</string>
+    <string name="commands_mode_execute">Execute one — run a single command in the live terminal</string>
+    <string name="commands_mode_sequence">Sequence — run steps in order</string>
+    <string name="commands_mode_insert_short">Insert only</string>
+    <string name="commands_mode_execute_short">Execute one</string>
+    <string name="commands_mode_sequence_short">Sequence</string>
+    <string name="commands_field_command">Command</string>
+    <string name="commands_field_command_hint">e.g. df -h {{path}}</string>
+    <string name="commands_field_steps">Steps, one per line, in order</string>
+    <string name="commands_field_steps_hint">e.g. cd {{dir}}\nls -la</string>
+    <string name="commands_field_variables">Variables, one per line: name or name=default</string>
+    <string name="commands_field_variables_hint">e.g. path=/home/user</string>
+    <string name="commands_field_variable_required">Required variables (comma-separated names, optional)</string>
+    <string name="commands_field_variable_required_hint">e.g. path</string>
+    <string name="commands_secret_note">Buttons must not store credentials. A button that looks like it contains a secret cannot be saved.</string>
+    <string name="commands_sequence_note">Sequences send steps in order with a short pause between them. They do not stop automatically on an error, because an interactive shell does not report per-step results to the app. Use Stop to prevent further steps from being sent.</string>
+    <string name="commands_action_insert">Insert</string>
+    <string name="commands_action_run">Run</string>
+    <string name="commands_action_run_sequence">Run sequence</string>
+    <string name="commands_action_stop">Stop sequence</string>
+    <string name="commands_action_edit">Edit</string>
+    <string name="commands_action_duplicate">Duplicate</string>
+    <string name="commands_action_move_up">Move up</string>
+    <string name="commands_action_move_down">Move down</string>
+    <string name="commands_action_open_session">Open session to use these buttons</string>
+    <string name="commands_delete_title">Delete this button?</string>
+    <string name="commands_delete_body">Delete %1$s? This cannot be undone.</string>
+    <string name="commands_param_title">Fill in parameters</string>
+    <string name="commands_param_preview_label">Preview — exactly what will be inserted or sent:</string>
+    <string name="commands_param_insert_note">Insert only: this text will be placed in the terminal input and will NOT run until you press Enter yourself.</string>
+    <string name="commands_param_execute_note">This command will be sent to the live terminal when you tap Run.</string>
+    <string name="commands_param_sequence_note">These steps will be sent to the live terminal in order when you tap Run sequence.</string>
+    <string name="shell_unconfirmed_warning">Shell not confirmed for this host — parameter values below are quoted for a POSIX shell. If this host actually runs cmd.exe, that quoting does not protect values. Set the host’s shell in Environment and save before running parameterised buttons.</string>
+    <string name="commands_risky_title">Risky command — confirm before running</string>
+    <string name="commands_risky_body">This command was flagged as potentially destructive, privilege-escalating, or disruptive. Detection is a heuristic and can miss dangerous commands, so check the command yourself before running it.</string>
+    <string name="commands_risky_reasons_label">Why it was flagged:</string>
+    <string name="commands_risky_run_anyway">Run anyway</string>
+    <string name="commands_sequence_progress">Sequence: step %1$d of %2$d sent</string>
+    <string name="commands_sequence_stopped">Sequence stopped after step %1$d of %2$d. Steps already sent keep running on the server.</string>
+    <string name="commands_session_buttons_title">Command buttons for this host</string>
+    <string name="commands_session_buttons_note">Insert places text in the terminal without running it. Run sends it to the live terminal. Nothing runs until you tap Run or Insert.</string>
+
+    <!-- Environment and paths (prompt 09) -->
+    <string name="action_environment_host">Environment and paths</string>
+    <string name="env_title">Environment and paths</string>
+    <string name="env_for_host">Environment and paths for %1$s</string>
+    <string name="env_screen_note">These settings belong to this host only. The server may ignore environment requests, and login profiles or server policies can override them — nothing here guarantees a variable reaches the shell.</string>
+    <string name="env_values_encrypted_note">Environment values are encrypted on this device and never shown. Editing a variable requires typing its value again.</string>
+    <string name="env_apply_next_connection_note">Changes apply on the next connection, not to a session that is already running.</string>
+    <string name="env_remote_shell_title">Remote shell</string>
+    <string name="env_shell_posix">POSIX shell (Linux, macOS, Unix)</string>
+    <string name="env_shell_powershell">PowerShell (Windows)</string>
+    <string name="env_shell_cmd">Command Prompt, cmd.exe (Windows)</string>
+    <string name="env_remote_dir">Remote working directory (optional)</string>
+    <string name="env_remote_dir_hint">e.g. /home/user</string>
+    <string name="env_remote_dir_note">For a terminal session, this directory is entered once with a visible cd command when the shell starts. For file browsing, it is the starting directory for POSIX paths only. Command buttons are never changed by this setting.</string>
+    <string name="env_local_folder_title">Local folder on this phone (optional)</string>
+    <string name="env_local_folder_none">No folder chosen.</string>
+    <string name="env_local_folder_note">Chosen with the system file picker. Downloads for this host write straight into this folder. No broad storage access is used.</string>
+    <string name="env_choose_folder">Choose folder</string>
+    <string name="env_clear_folder">Clear folder</string>
+    <string name="env_folder_permission_error">Folder permission could not be kept, so the folder was not saved.</string>
+    <string name="env_settings_saved">Settings saved.</string>
+    <string name="env_vars_title">Environment variables</string>
+    <string name="env_vars_note">Variables are requested from the server when a terminal session starts. The server may accept or ignore each one; the session screen reports which were accepted.</string>
+    <string name="env_vars_empty">No environment variables for this host.</string>
+    <string name="env_value_masked">Value stored encrypted, never shown</string>
+    <string name="env_edit_var">Edit variable</string>
+    <string name="env_delete_var">Delete variable</string>
+    <string name="env_add_var">Add variable</string>
+    <string name="env_add_var_title">Add environment variable</string>
+    <string name="env_edit_var_title">Edit environment variable</string>
+    <string name="env_var_name">Variable name</string>
+    <string name="env_var_name_hint">e.g. EDITOR</string>
+    <string name="env_var_name_blank">Variable name must not be blank.</string>
+    <string name="env_var_value">Variable value</string>
+    <string name="env_var_value_hint">Value (may contain a secret — it is stored encrypted)</string>
+    <string name="env_var_value_hint_edit">Type the new value (the stored value is never shown)</string>
+    <string name="env_delete_title">Delete this variable?</string>
+    <string name="env_delete_body">Delete %1$s? This cannot be undone.</string>
+    <string name="env_session_title">Environment</string>
+    <string name="env_session_working_dir">Working directory: %1$s</string>
+    <string name="env_session_applied">Accepted by server: %1$s</string>
+    <string name="env_session_rejected">Not applied by server: %1$s</string>
+    <string name="env_session_server_note">Acceptance means the server did not reject the request. Login profiles can still override a value — check in the shell if a command behaves unexpectedly.</string>
+    <string name="files_local_folder_note">Downloads for this host go straight into its local folder (see the host environment settings).</string>
+
+    <!-- Advanced -->
+    <string name="advanced_title">Advanced connections</string>
+    <string name="advanced_intro">Tunnels run on their own connection, separate from the terminal session. Pick a host, configure its tunnels, jump chain, and proxy, then start them.</string>
+    <string name="advanced_loopback_note">By default every tunnel binds to loopback (127.0.0.1) only, so it is reachable only from this device.</string>
+    <string name="advanced_pick_host">Pick a host</string>
+    <string name="advanced_no_hosts">No hosts yet. Add a host first.</string>
+    <string name="advanced_tunnels">SSH tunnels</string>
+    <string name="advanced_jump">Jump hosts</string>
+    <string name="advanced_proxy">Proxy options</string>
+    <string name="tunnel_add_title">Add tunnel</string>
+    <string name="tunnel_kind_local">Local</string>
+    <string name="tunnel_kind_remote">Remote</string>
+    <string name="tunnel_label">Label (optional)</string>
+    <string name="tunnel_label_hint">e.g. Web admin</string>
+    <string name="tunnel_bind">Bind address</string>
+    <string name="tunnel_bind_hint">127.0.0.1</string>
+    <string name="tunnel_bind_port">Bind port</string>
+    <string name="tunnel_target_host">Target host</string>
+    <string name="tunnel_target_hint">localhost</string>
+    <string name="tunnel_target_port">Target port</string>
+    <string name="tunnel_allow_non_loopback">Allow non-loopback bind — exposes this port to the local network. Use only on trusted networks.</string>
+    <string name="tunnel_delete">Delete tunnel</string>
+    <string name="tunnel_delete_title">Delete this tunnel?</string>
+    <string name="tunnel_delete_body">Delete the tunnel %1$s? Its configuration will be removed.</string>
+    <string name="jump_empty">No jump hosts. Connections go directly to the target.</string>
+    <string name="jump_add">Add to chain</string>
+    <string name="jump_clear">Clear chain</string>
+    <string name="jump_clear_title">Clear the jump chain?</string>
+    <string name="jump_clear_body">Remove all jump hosts for this host? The target host itself is not affected.</string>
+    <string name="proxy_none">No proxy</string>
+    <string name="proxy_socks">SOCKS proxy</string>
+    <string name="proxy_spec">Proxy specification</string>
+    <string name="proxy_spec_hint">socks://host:port</string>
+    <string name="proxy_parse">Parse specification</string>
+    <string name="proxy_host">Proxy host</string>
+    <string name="proxy_port">Proxy port</string>
+    <string name="proxy_save">Save proxy</string>
+    <string name="proxy_metadata_note">A SOCKS proxy operator can see the target hostname and port and the timing of the connection, though not the encrypted SSH content. Only use a proxy you trust.</string>
+    <string name="proxy_clear">Clear proxy</string>
+    <string name="proxy_current">Current proxy: %1$s</string>
+    <string name="advanced_session_title">Tunnel session</string>
+    <string name="tunnel_start">Start tunnels</string>
+    <string name="tunnel_stop">Stop tunnels</string>
+    <string name="tunnel_connecting">Connecting…</string>
+    <string name="tunnel_empty">No tunnels yet. Add one below.</string>
+    <string name="tunnel_port_number_error">Ports must be numbers between 1 and 65535.</string>
+    <string name="tunnel_move_up">Move up</string>
+    <string name="tunnel_move_down">Move down</string>
+    <string name="tunnel_running">Tunnels running</string>
+    <string name="tunnel_active_title">Active tunnels</string>
+    <string name="advanced_passphrase_target">Target passphrase (key hosts only)</string>
+    <string name="advanced_passphrase_hop">Passphrase for %1$s</string>
+    <string name="advanced_blocked_title">Not available</string>
+    <string name="advanced_blocked_dynamic">Dynamic / SOCKS forwarding</string>
+    <string name="advanced_blocked_dynamic_reason">sshj 0.40.0 has no SOCKS server, so there is nothing safe to offer here.</string>
+    <string name="advanced_blocked_http">HTTP proxy (CONNECT)</string>
+    <string name="advanced_blocked_http_reason">No standard-library support; a hand-written CONNECT handshake is unproven and is not shipped.</string>
+    <string name="advanced_blocked_command">ProxyCommand</string>
+    <string name="advanced_blocked_command_reason">sshj has no ProxyCommand support, and bridging a local process to a socket is unproven here.</string>
+    <string name="advanced_blocked_socks_auth">Authenticated SOCKS proxy</string>
+    <string name="advanced_blocked_socks_auth_reason">SOCKS authentication would need the JVM-global Authenticator, which would leak credentials across connections.</string>
+
+    <!-- Desktop -->
+    <string name="desktop_title">Remote desktop</string>
+    <string name="desktop_body">Remote desktop is conditional, not promised. RDP is blocked by the prompt 12 proof gate: no RDP connection has been demonstrated yet. VNC has a protocol core implemented but no session yet: it has never connected to a real VNC server. See the rows below for the exact state and what would unblock each.</string>
+    <string name="desktop_rdp">Windows (RDP)</string>
+    <string name="desktop_rdp_blocked">Blocked by the prompt 12 proof-of-concept gate: no RDP connection has been demonstrated yet. FreeRDP is the only candidate, but it ships no Android library — its native code must be built from source with the Android NDK, and this environment has no NDK, no CI build, and no Windows endpoint to test against.</string>
+    <string name="desktop_rdp_library">Candidate: FreeRDP 3.x, actively maintained, with an Android port updated in recent releases. Its core is Apache-2.0; the full licence inventory for the exact linked components is still open and must come from the FreeRDP source tree at integration time.</string>
+    <string name="desktop_rdp_unblock">What would unblock it: a CI machine with the NDK that builds the FreeRDP native libraries for the target ABIs, a licence inventory for the exact linked components, and a real connection to a compatible Windows endpoint — Pro, Enterprise, or Education with Remote Desktop enabled. Windows Home cannot host a Remote Desktop session.</string>
+    <string name="desktop_vnc">Linux (VNC)</string>
+    <string name="desktop_vnc_core">Protocol core implemented, session not yet available: a pure-Kotlin RFB client core is in the app — protocol versions 3.3, 3.7 and 3.8, No Authentication and VNC Authentication, and Raw, CopyRect, RRE, CoRRE and Hextile framebuffer decoding — with unit tests for the protocol logic. It has never connected to a real VNC server.</string>
+    <string name="desktop_vnc_blocked">Blocked by the prompt 13 proof-of-concept gate for a session: the pack requires a proven connection against a controlled compatible server before full integration, and this environment has no controlled Linux VNC server, no device, and no CI run to prove against. Tight, ZRLE, TRLE and encrypted authentication (VeNCrypt, TLS, X.509) are not implemented and are refused cleanly, never silently downgraded. VNC Authentication itself is weak by design and must only be used on a trusted network or through an SSH tunnel.</string>
+    <string name="desktop_vnc_unblock">What would unblock it: a controlled Linux VNC server (for example TigerVNC or x11vnc) with documented version, authentication and encodings, a real connection from a device build proving the handshake, authentication and framebuffer updates end to end, and a session screen with scaling, pointer and keyboard input — only then a connect button.</string>
+
+    <!-- Backup / Import / Export -->
+    <string name="backup_title">Import / Export</string>
+    <string name="action_backup">Import / Export</string>
+    <string name="backup_intro">Move hosts between devices with a backup file. Only one format is supported: a TermBridge backup (JSON, version 1). Other files, including PuTTY files, are rejected.</string>
+    <string name="backup_excluded_note">Never exported: trusted host keys (trust must be re-established on first connection after import) and the local folder on this device (a folder choice does not work on another device). Nothing here runs a command or trusts a host key automatically.</string>
+    <string name="backup_export_title">Export</string>
+    <string name="backup_export_plain">Export without secrets</string>
+    <string name="backup_export_encrypted">Encrypted backup (with credentials)</string>
+    <string name="backup_export_plain_note">Without secrets, the file holds hosts, command buttons, working directories, tunnels, and proxies — but no password, private key, or environment value. After import, credentials and environment values must be entered again.</string>
+    <string name="backup_passphrase">Backup passphrase</string>
+    <string name="backup_passphrase_confirm">Confirm backup passphrase</string>
+    <string name="backup_passphrase_note">The passphrase is never stored. If you lose it, the encrypted backup cannot be opened — there is no recovery. It must be at least 8 characters. Anyone with this file can try passphrases offline, without the app's protection — use a long, unique passphrase.</string>
+    <string name="backup_export_action">Create export…</string>
+    <string name="backup_import_title">Import</string>
+    <string name="backup_import_pick">Choose a backup file…</string>
+    <string name="backup_import_passphrase">Backup passphrase</string>
+    <string name="backup_import_passphrase_hint">Only for encrypted backups</string>
+    <string name="backup_preview_title">Preview — nothing is imported yet</string>
+    <string name="backup_preview_counts">Hosts: %1$d, command buttons: %2$d, tunnels: %3$d, environment variables: %4$d.</string>
+    <string name="backup_preview_encrypted">This backup is encrypted and was opened with your passphrase.</string>
+    <string name="backup_preview_has_credentials">This backup contains credentials, which will be stored encrypted on this device.</string>
+    <string name="backup_preview_conflicts">Already on this device (same server and username):</string>
+    <string name="backup_conflict_line">%1$s already exists as %2$s.</string>
+    <string name="backup_preview_warnings">Warnings:</string>
+    <string name="backup_replace_checkbox">Replace the existing hosts listed above</string>
+    <string name="backup_replace_note">Without this option, conflicting hosts are skipped and the existing hosts are left untouched. With it, the existing host and its buttons, settings, and tunnels are replaced — but its credential is replaced only when this backup contains one.</string>
+    <string name="backup_replace_title">Replace existing hosts?</string>
+    <string name="backup_replace_body">This will replace %1$d existing host(s). A credential is replaced only when this backup contains one; otherwise the existing credential is kept.</string>
+    <string name="backup_replace_confirm">Replace</string>
+    <string name="backup_import_apply">Import</string>
+    <string name="backup_result_title">Import result</string>
+    <string name="backup_result_imported">Imported: %1$s.</string>
+    <string name="backup_result_replaced">Replaced: %1$s.</string>
+    <string name="backup_result_skipped">Skipped (already existed): %1$s.</string>
+
+    <!-- Settings / Diagnostics / About -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_note">Settings that change behaviour arrive with the features they control. For now this screen only leads to diagnostics and about information, and the app follows the system theme.</string>
+    <string name="settings_secure_note">Screenshots and screen recordings are blocked in this app, so terminal content cannot appear in the Recents overview. This also means you cannot screenshot the app yourself.</string>
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_app_version">App version: 0.1.0-foundation</string>
+    <!-- Prompt 14 fix: the old text claimed no session feature
+         existed, which stopped being true in prompt 06. The screen
+         now shows the real live-session state from the nav graph. -->
+    <string name="diagnostics_no_sessions">Active sessions: none</string>
+    <!-- Prompt 14: terminal control-key labels, previously hardcoded
+         in SessionScreen. Key names, not prose, but centralised
+         like every other user-visible string. Arrow symbols stay
+         symbols (language-independent) and are not strings. -->
+    <string name="terminal_ctrl_c">Ctrl-C</string>
+    <string name="terminal_ctrl_d">Ctrl-D</string>
+    <string name="terminal_key_tab">Tab</string>
+    <string name="terminal_key_esc">Esc</string>
+    <string name="terminal_jump_to_latest">Jump to latest (%1$d new lines)</string>
+    <string name="session_live_indicator">Live session — return to terminal</string>
+
+    <!-- Prompt 14: diagnostics labels, previously hardcoded. -->
+    <string name="diagnostics_device">Device: %1$s %2$s</string>
+    <string name="diagnostics_android">Android: %1$s (SDK %2$d)</string>
+    <string name="diagnostics_live_session">Active sessions: 1 live session (see the Session screen)</string>
+
+    <string name="about_title">About and licenses</string>
+    <string name="about_body">TermBridge is an independent app for managing remote servers over SSH. It is not affiliated with any other terminal or remote-access product, and it contains no copied branding, code, or assets from one.</string>
+    <string name="about_licenses_title">Libraries</string>
+    <string name="about_licenses_body">Jetpack Compose (BOM 2024.09.00), Navigation Compose 2.8.0, Kotlin Coroutines 1.8.1, Room 2.6.1, sshj 0.40.0, kotlinx-serialization-json 1.7.3, Material Icons Extended (Compose BOM 2024.09.00), and the AndroidX core, lifecycle, and activity libraries — all Apache License 2.0. Test-only dependencies (JUnit, Espresso, Compose UI test) are not shipped in the app.</string>
+</resources>

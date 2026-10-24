@@ -1,0 +1,42 @@
+# TermBridge .gitignore — secrets and machine state must never be committed.
+# This list is enforced by prompt 02; prompt 18 re-verifies it at release.
+
+# Gradle / build output
+.gradle/
+build/
+**/build/
+local.properties
+*.class
+
+# Android Studio / IDE
+.idea/
+*.iml
+.DS_Store
+
+# Signing keys, keystores, and credentials — NEVER commit these.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+signing.properties
+
+# Local machine state and secrets
+local.properties
+*.env
+secrets.properties
+google-services.json
+
+# Governance internals live OUTSIDE this tree (../pfp-private/) and
+# must never be copied in. This rule is a second net, not the policy:
+*.pfp
+pfp/
+pfp-private/
+prompt-pack/
+
+# Release / generated artifacts (rebuilt by CI, not committed)
+*.apk
+*.aab
+*.zip
