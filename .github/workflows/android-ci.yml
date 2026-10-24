@@ -24,8 +24,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Explicit sdkmanager install. The android-actions/setup-android@v3
+      # action requested the obsolete `tools` package, which cmdline-tools
+      # 16.0 no longer provides ("Failed to find package 'tools'").
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "cmdline-tools;latest" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle (uses the committed wrapper, 8.10.2)
         uses: gradle/actions/setup-gradle@v4
@@ -61,8 +67,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Explicit sdkmanager install. The android-actions/setup-android@v3
+      # action requested the obsolete `tools` package, which cmdline-tools
+      # 16.0 no longer provides ("Failed to find package 'tools'").
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "cmdline-tools;latest" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle (uses the committed wrapper, 8.10.2)
         uses: gradle/actions/setup-gradle@v4
