@@ -48,7 +48,14 @@ class TermBridgeApplication : Application() {
      * withTransaction block here covers all of their DAOs.
      */
     private val transactionRunner: TransactionRunner by lazy {
-        TransactionRunner { block -> database.withTransaction(block) }
+        // Regular interface, not a SAM lambda: a fun interface
+        // cannot declare a generic method, so the lambda form
+        // does not compile (CI run #4, compileDebugKotlin).
+        object : TransactionRunner {
+            override suspend fun <T> run(block: suspend () -> T): T {
+                return database.withTransaction(block)
+            }
+        }
     }
 
     val hostRepository: HostRepository by lazy {

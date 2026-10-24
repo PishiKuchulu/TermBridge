@@ -17,6 +17,6 @@ package com.pishi.termbridge.data
  * provides this; a test double that merely runs the block does
  * not, and tests using such a double must say so.
  */
-fun interface TransactionRunner {
+interface TransactionRunner {
     suspend fun <T> run(block: suspend () -> T): T
 }

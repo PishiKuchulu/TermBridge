@@ -80,7 +80,9 @@ class BackupService(
     // TermBridgeApplication). Fresh imports keep the old
     // warning-per-child behaviour — they are additive, so a
     // failed child is a warning, not a half-replaced host.
-    private val transactionRunner: TransactionRunner = TransactionRunner { it() }
+    private val transactionRunner: TransactionRunner = object : TransactionRunner {
+        override suspend fun <T> run(block: suspend () -> T): T = block()
+    }
 ) {
     suspend fun buildExport(includeSecrets: Boolean, passphrase: CharArray?): String {
         val hosts = hostRepository.getHosts().first()

@@ -19,7 +19,9 @@ class HostRepositoryTest {
         hostDao: FakeHostDao = FakeHostDao(),
         trustedDao: FakeTrustedHostKeyDao = FakeTrustedHostKeyDao(),
         transactionRunner: com.pishi.termbridge.data.TransactionRunner =
-            com.pishi.termbridge.data.TransactionRunner { it() }
+            object : com.pishi.termbridge.data.TransactionRunner {
+                override suspend fun <T> run(block: suspend () -> T): T = block()
+            }
     ): Triple<HostRepository, FakeHostDao, FakeTrustedHostKeyDao> {
         return Triple(
             HostRepository(
@@ -135,9 +137,11 @@ class HostRepositoryTest {
         // Security fix 16 (L4): the whole delete sequence runs
         // inside one transaction when a runner is supplied.
         var runs = 0
-        val runner = com.pishi.termbridge.data.TransactionRunner { block ->
-            runs++
-            block()
+        val runner = object : com.pishi.termbridge.data.TransactionRunner {
+            override suspend fun <T> run(block: suspend () -> T): T {
+                runs++
+                return block()
+            }
         }
         val (repo, _, _) = repository(transactionRunner = runner)
         val saved = repo.saveHost(profile(), CredentialInput.Password("s3cr3t".toCharArray()))

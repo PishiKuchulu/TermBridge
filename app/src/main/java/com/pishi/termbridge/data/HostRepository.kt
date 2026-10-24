@@ -56,7 +56,9 @@ class HostRepository(
     // this transaction. Defaults to direct execution so existing
     // callers/tests keep working; production passes the real
     // database transaction (see TermBridgeApplication).
-    private val transactionRunner: TransactionRunner = TransactionRunner { it() }
+    private val transactionRunner: TransactionRunner = object : TransactionRunner {
+        override suspend fun <T> run(block: suspend () -> T): T = block()
+    }
 ) : com.pishi.termbridge.transport.HostKeyTrustStore {
     fun getHosts(): Flow<List<HostProfile>> =
         hostDao.getAll().map { rows -> rows.map { it.toProfile() } }
