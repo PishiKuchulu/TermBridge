@@ -139,9 +139,9 @@ object BackupCodec {
         val payload = encodeDocument(document)
         if (!encrypted) {
             return buildJsonObject {
-                put("format", BACKUP_FORMAT)
-                put("version", BACKUP_VERSION)
-                put("encrypted", false)
+                put("format", JsonPrimitive(BACKUP_FORMAT))
+                put("version", JsonPrimitive(BACKUP_VERSION))
+                put("encrypted", JsonPrimitive(false))
                 put("payload", payload)
             }.toString()
         }
@@ -150,14 +150,14 @@ object BackupCodec {
         }
         val blob = ExportCrypto.encrypt(payload.toString().toByteArray(Charsets.UTF_8), passphrase)
         return buildJsonObject {
-            put("format", BACKUP_FORMAT)
-            put("version", BACKUP_VERSION)
-            put("encrypted", true)
-            put("kdf", ExportCrypto.KDF_ALGORITHM)
-            put("iterations", ExportCrypto.ITERATIONS)
-            put("salt", Base64.getEncoder().encodeToString(blob.salt))
-            put("iv", Base64.getEncoder().encodeToString(blob.iv))
-            put("ciphertext", Base64.getEncoder().encodeToString(blob.ciphertext))
+            put("format", JsonPrimitive(BACKUP_FORMAT))
+            put("version", JsonPrimitive(BACKUP_VERSION))
+            put("encrypted", JsonPrimitive(true))
+            put("kdf", JsonPrimitive(ExportCrypto.KDF_ALGORITHM))
+            put("iterations", JsonPrimitive(ExportCrypto.ITERATIONS))
+            put("salt", JsonPrimitive(Base64.getEncoder().encodeToString(blob.salt)))
+            put("iv", JsonPrimitive(Base64.getEncoder().encodeToString(blob.iv)))
+            put("ciphertext", JsonPrimitive(Base64.getEncoder().encodeToString(blob.ciphertext)))
         }.toString()
     }
 
@@ -239,40 +239,40 @@ object BackupCodec {
         put("hosts", buildJsonArray {
             for (host in document.hosts) {
                 add(buildJsonObject {
-                    put("exportId", host.exportId)
-                    put("name", host.name)
-                    put("hostname", host.hostname)
-                    put("port", host.port)
-                    put("username", host.username)
-                    put("authType", host.authType.name)
-                    put("notes", host.notes)
-                    put("tags", host.tags)
+                    put("exportId", JsonPrimitive(host.exportId))
+                    put("name", JsonPrimitive(host.name))
+                    put("hostname", JsonPrimitive(host.hostname))
+                    put("port", JsonPrimitive(host.port))
+                    put("username", JsonPrimitive(host.username))
+                    put("authType", JsonPrimitive(host.authType.name))
+                    put("notes", JsonPrimitive(host.notes))
+                    put("tags", JsonPrimitive(host.tags))
                     if (host.credential != null) {
                         put("credential", buildJsonObject {
-                            put("kind", host.credential.kind.name)
-                            put("value", host.credential.value)
+                            put("kind", JsonPrimitive(host.credential.kind.name))
+                            put("value", JsonPrimitive(host.credential.value))
                         })
                     } else {
                         put("credential", JsonNull)
                     }
-                    put("hasCredential", host.hasCredential)
+                    put("hasCredential", JsonPrimitive(host.hasCredential))
                     put("buttons", buildJsonArray {
                         for (button in host.buttons) {
                             add(buildJsonObject {
-                                put("label", button.label)
-                                put("category", button.category)
-                                put("sortOrder", button.sortOrder)
-                                put("mode", button.mode.name)
-                                put("template", button.template)
+                                put("label", JsonPrimitive(button.label))
+                                put("category", JsonPrimitive(button.category))
+                                put("sortOrder", JsonPrimitive(button.sortOrder))
+                                put("mode", JsonPrimitive(button.mode.name))
+                                put("template", JsonPrimitive(button.template))
                                 put("steps", buildJsonArray {
                                     for (step in button.steps) add(JsonPrimitive(step))
                                 })
                                 put("variables", buildJsonArray {
                                     for (variable in button.variables) {
                                         add(buildJsonObject {
-                                            put("name", variable.name)
-                                            put("defaultValue", variable.defaultValue)
-                                            put("required", variable.required)
+                                            put("name", JsonPrimitive(variable.name))
+                                            put("defaultValue", JsonPrimitive(variable.defaultValue))
+                                            put("required", JsonPrimitive(variable.required))
                                         })
                                     }
                                 })
@@ -281,8 +281,8 @@ object BackupCodec {
                     })
                     if (host.settings != null) {
                         put("settings", buildJsonObject {
-                            put("remoteWorkingDirectory", host.settings.remoteWorkingDirectory)
-                            put("remoteShell", host.settings.remoteShell.name)
+                            put("remoteWorkingDirectory", JsonPrimitive(host.settings.remoteWorkingDirectory))
+                            put("remoteShell", JsonPrimitive(host.settings.remoteShell.name))
                         })
                     } else {
                         put("settings", JsonNull)
@@ -290,30 +290,30 @@ object BackupCodec {
                     put("envVars", buildJsonArray {
                         for (variable in host.envVars) {
                             add(buildJsonObject {
-                                put("name", variable.name)
-                                put("value", variable.value)
+                                put("name", JsonPrimitive(variable.name))
+                                put("value", JsonPrimitive(variable.value))
                             })
                         }
                     })
                     put("tunnels", buildJsonArray {
                         for (tunnel in host.tunnels) {
                             add(buildJsonObject {
-                                put("kind", tunnel.kind.name)
-                                put("bindAddress", tunnel.bindAddress)
-                                put("bindPort", tunnel.bindPort)
-                                put("targetHost", tunnel.targetHost)
-                                put("targetPort", tunnel.targetPort)
-                                put("allowNonLoopback", tunnel.allowNonLoopback)
-                                put("enabled", tunnel.enabled)
-                                put("label", tunnel.label)
+                                put("kind", JsonPrimitive(tunnel.kind.name))
+                                put("bindAddress", JsonPrimitive(tunnel.bindAddress))
+                                put("bindPort", JsonPrimitive(tunnel.bindPort))
+                                put("targetHost", JsonPrimitive(tunnel.targetHost))
+                                put("targetPort", JsonPrimitive(tunnel.targetPort))
+                                put("allowNonLoopback", JsonPrimitive(tunnel.allowNonLoopback))
+                                put("enabled", JsonPrimitive(tunnel.enabled))
+                                put("label", JsonPrimitive(tunnel.label))
                             })
                         }
                     })
                     if (host.proxy != null) {
                         put("proxy", buildJsonObject {
-                            put("kind", host.proxy.kind.name)
-                            put("proxyHost", host.proxy.proxyHost)
-                            put("proxyPort", host.proxy.proxyPort)
+                            put("kind", JsonPrimitive(host.proxy.kind.name))
+                            put("proxyHost", JsonPrimitive(host.proxy.proxyHost))
+                            put("proxyPort", JsonPrimitive(host.proxy.proxyPort))
                         })
                     } else {
                         put("proxy", JsonNull)
