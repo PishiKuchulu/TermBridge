@@ -3,7 +3,7 @@
     <!-- Manifest theme only. All in-app styling is Compose
          (TermBridgeTheme); this style exists because the manifest
          requires a theme and to keep the splash/window background sane. -->
-    <style name="Theme.TermBridge" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.TermBridge" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
