@@ -299,7 +299,7 @@
     <string name="backup_export_plain_note">Without secrets, the file holds hosts, command buttons, working directories, tunnels, and proxies — but no password, private key, or environment value. After import, credentials and environment values must be entered again.</string>
     <string name="backup_passphrase">Backup passphrase</string>
     <string name="backup_passphrase_confirm">Confirm backup passphrase</string>
-    <string name="backup_passphrase_note">The passphrase is never stored. If you lose it, the encrypted backup cannot be opened — there is no recovery. It must be at least 8 characters. Anyone with this file can try passphrases offline, without the app's protection — use a long, unique passphrase.</string>
+    <string name="backup_passphrase_note">The passphrase is never stored. If you lose it, the encrypted backup cannot be opened — there is no recovery. It must be at least 8 characters. Anyone with this file can try passphrases offline, without the app\'s protection — use a long, unique passphrase.</string>
     <string name="backup_export_action">Create export…</string>
     <string name="backup_import_title">Import</string>
     <string name="backup_import_pick">Choose a backup file…</string>
