@@ -49,12 +49,14 @@ jobs:
 
   # Prompt 15: instrumented suite on an emulator, as a separate
   # job so an emulator failure does not hide the unit-test signal
-  # and vice versa. The SshIntegrationTest cases are class-level
-  # @Ignore'd (no fixture yet) and will report as skipped, not
-  # passed; the runnable instrumented tests are Keystore/Room
-  # and the activity smoke test. NOT RUN anywhere yet — no repo
-  # exists, so the first CI run must watch the emulator job
-  # (API level, runner version, timeout) before trusting it.
+  # and vice versa. Remediation phase 7: the script provisions
+  # the SSH fixture (tests/fixture/setup-sshd-fixture.sh) before
+  # the emulator run, so the 12 implemented SshIntegrationTest
+  # cases run against a real OpenSSH server; the 6 remaining
+  # cases stay @Ignore'd with specific reasons, and without a
+  # fixture the tests skip via Assume. The fixture password is
+  # generated per run, used only inside this script, and never
+  # committed.
   instrumented:
     runs-on: ubuntu-latest
     steps:
@@ -85,8 +87,15 @@ jobs:
           api-level: 29
           target: google_apis
           arch: x86_64
-          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
-
+          script:  |
+            FIXTURE_PASSWORD="$(openssl rand -base64 24)"
+            export FIXTURE_PASSWORD
+            bash tests/fixture/setup-sshd-fixture.sh
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace \
+              -Pandroid.testInstrumentationRunnerArguments.fixture_host=10.0.2.2 \
+              -Pandroid.testInstrumentationRunnerArguments.fixture_port=2222 \
+              -Pandroid.testInstrumentationRunnerArguments.fixture_user=termbridge-test \
+              -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD"
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v4
