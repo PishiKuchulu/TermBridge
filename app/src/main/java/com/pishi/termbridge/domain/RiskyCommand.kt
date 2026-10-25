@@ -51,7 +51,7 @@ object RiskyCommand {
             RegexOption.IGNORE_CASE
         ),
         "delete of a system or home path" to Regex(
-            """^\s*rm\s+.*\s(/|/\*|~|~/\S*|/etc|/usr|/var|/boot|/bin|/sbin|\$HOME(/\S*)?)\s*$""",
+            """^\s*rm\s+.*\s(/|/\*|~|~/\S*|/etc|/usr|/var|/boot|/bin|/sbin|\${'$'}HOME(/\S*)?)\s*$""",
             RegexOption.IGNORE_CASE
         ),
         "shutdown, reboot, or poweroff (systemd)" to Regex(

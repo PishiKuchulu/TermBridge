@@ -34,8 +34,10 @@ stated otherwise.
   unpins the view; new output then shows a "Jump to latest (N
   new lines)" action instead of yanking the view, and scrolling
   back to the bottom re-pins it.
-- PTY: `xterm-256color`, size set at shell start and on resize
-  (sshj `setWindowSize`).
+- PTY: `xterm-256color`, size set at shell start only. Resize
+  updates the local parser grid; sshj 0.40.0 has no
+  window-change API, so the server-side PTY size does not
+  follow a later resize (CI run #6 fix).
 - Input: typed characters sent as typed, Enter (CR), Ctrl-C
   (0x03), Ctrl-D (0x04), Tab, Escape, arrow keys (CSI A/B/C/D),
   backspace (DEL 0x7F).

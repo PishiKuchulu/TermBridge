@@ -11,6 +11,7 @@ import com.pishi.termbridge.domain.ExportHost
 import com.pishi.termbridge.domain.ExportProxy
 import com.pishi.termbridge.domain.ExportSettings
 import com.pishi.termbridge.domain.ExportTunnel
+import com.pishi.termbridge.domain.ExportVariable
 import com.pishi.termbridge.domain.HostEnvironmentSettings
 import com.pishi.termbridge.domain.HostProfile
 import com.pishi.termbridge.domain.ImportConflict

@@ -19,8 +19,10 @@ import net.schmizz.sshj.connection.channel.direct.Session
  * A live shell channel over an established SSH connection.
  *
  * - PTY is allocated as "xterm-256color" at the size given at
- *   start; [resize] updates both the parser grid and the remote
- *   PTY size (sshj `setWindowSize`).
+ *   start; [resize] updates only the local parser grid, because
+ *   sshj 0.40.0 exposes no window-change API (its Session has
+ *   no setWindowSize method), so the server-side PTY size stays
+ *   at the size negotiated at shell start.
  * - Output is read as UTF-8 characters (InputStreamReader, so a
  *   multi-byte character split across reads is decoded correctly),
  *   fed to the VT parser, and published as snapshots.
@@ -156,15 +158,11 @@ class TerminalSession(
     fun sendArrowLeft() = sendText("\u001B[D")
 
     fun resize(cols: Int, rows: Int) {
+        // No window-change call: sshj 0.40.0 has no setWindowSize
+        // API, so the server-side PTY size stays at its start
+        // size. The local grid still follows the measured area.
         parser.resize(cols, rows)
         _snapshot.value = parser.snapshot()
-        try {
-            session?.setWindowSize(cols, rows)
-        } catch (_: Exception) {
-            // PTY size may now differ from the parser grid; the
-            // next resize or reconnect corrects it. Never crash
-            // the terminal for a failed window-change request.
-        }
     }
 
     fun close() {
