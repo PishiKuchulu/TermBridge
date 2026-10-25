@@ -74,19 +74,25 @@ class InMemoryTrustStore : HostKeyTrustStore {
     fun stored(endpoint: String): String? = store[endpoint]
 }
 
-/** Test-controlled trust decisions; records every decision made. */
-class TestDecisionHandler(
+/**
+ * Test-controlled trust decisions; records every decision made.
+ * Open (class + methods) because one trust-flow test extends
+ * it with a handler that throws on any decision — CI run #20
+ * failed to compile the test class when this was final
+ * (Kotlin classes and members are final by default).
+ */
+open class TestDecisionHandler(
     var answerUnknown: Boolean = true,
     var answerChanged: Boolean = false
 ) : HostKeyDecisionHandler {
     val decisions = mutableListOf<PendingTrust>()
 
-    override suspend fun decideUnknown(pending: PendingTrust): Boolean {
+    open override suspend fun decideUnknown(pending: PendingTrust): Boolean {
         decisions += pending
         return answerUnknown
     }
 
-    override suspend fun decideChanged(pending: PendingTrust): Boolean {
+    open override suspend fun decideChanged(pending: PendingTrust): Boolean {
         decisions += pending
         return answerChanged
     }
