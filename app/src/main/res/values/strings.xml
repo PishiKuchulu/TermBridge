@@ -160,6 +160,8 @@
     <string name="commands_param_execute_note">This command will be sent to the live terminal when you tap Run.</string>
     <string name="commands_param_sequence_note">These steps will be sent to the live terminal in order when you tap Run sequence.</string>
     <string name="shell_unconfirmed_warning">Shell not confirmed for this host — parameter values below are quoted for a POSIX shell. If this host actually runs cmd.exe, that quoting does not protect values. Set the host’s shell in Environment and save before running parameterised buttons.</string>
+    <string name="shell_blocked_unconfirmed">Parameterised commands are blocked while this host’s shell is not confirmed. Set the host’s shell in Environment and save, then try again.</string>
+    <string name="shell_blocked_stale">This command was prepared for a different shell. Open the button again to prepare it for the current shell.</string>
     <string name="commands_risky_title">Risky command — confirm before running</string>
     <string name="commands_risky_body">This command was flagged as potentially destructive, privilege-escalating, or disruptive. Detection is a heuristic and can miss dangerous commands, so check the command yourself before running it.</string>
     <string name="commands_risky_reasons_label">Why it was flagged:</string>

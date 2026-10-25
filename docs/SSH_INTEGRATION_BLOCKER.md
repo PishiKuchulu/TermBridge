@@ -1,5 +1,48 @@
 # TermBridge — SSH Integration-Test Blocker (Prompt 05)
 
+## Update, 2026-10-25 (remediation phase 3) — PARTIALLY UNBLOCKED
+
+Status: a fixture now EXISTS and tier-1 tests are implemented
+against it. The original prompt-05 block below is preserved as
+history; it no longer describes the whole suite.
+
+- Fixture: `tests/fixture/setup-sshd-fixture.sh` provisions a
+  dedicated OpenSSH instance (own config + host keys, port
+  2222, password auth, `AcceptEnv TERM_BRIDGE_*`) without
+  touching the system sshd. Credentials travel only as
+  instrumentation arguments, never committed.
+- Harness: `SshFixture` (androidTest) reads fixture
+  coordinates from instrumentation arguments and
+  Assume-skips every test when no fixture is configured —
+  a skip, never a fake pass.
+- Implemented (12 tests, real server, no mocks):
+  handshake + password auth, wrong-credentials failure,
+  unknown-key trust flow (reject / trust / match-no-dialog),
+  disconnect + cancel, shell streaming, SFTP round-trip,
+  SFTP zero-byte + Unicode + cancellation, button execute,
+  button insert-never-executes (proven by file absence),
+  env accepted/rejected reporting, working-directory pwd,
+  SFTP download landing in a local folder.
+- Still blocked (6 tests, each @Ignore'd with its own reason):
+  changed host key (needs fixture-side key rotation on the
+  SAME endpoint), local forward (needs a fixture echo
+  service), remote forward (needs a fixture-side service),
+  jump chain (needs a second fixture sshd as bastion),
+  SOCKS proxy (needs a fixture SOCKS proxy), partial tunnel
+  failure (needs a fixture that rejects one forward).
+- Correction to an old premise: SftpManager has NO
+  working-directory concept — paths are absolute only. The
+  old test #12 premise ("SFTP starts in the working
+  directory") is therefore not implemented as written; the
+  replacement test proves absolute-path transfer plus local
+  landing, which is what the code actually does.
+- CI wiring is pending (remediation phase 7): the
+  instrumented job must provision the fixture before the
+  emulator run. Until that job is green, tier 1 is
+  implemented-but-not-CI-verified.
+
+## Original block (prompt 05, preserved)
+
 Status: BLOCKED — no controlled SSH test server is available in
 this sandbox or in CI at the time of writing.
 

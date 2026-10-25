@@ -19,6 +19,7 @@ import com.pishi.termbridge.domain.ImportPreview
 import com.pishi.termbridge.domain.ImportResult
 import com.pishi.termbridge.domain.JumpChain
 import com.pishi.termbridge.domain.ProxyConfig
+import com.pishi.termbridge.domain.SecretRedactor
 import com.pishi.termbridge.domain.TunnelConfig
 import com.pishi.termbridge.domain.wipe
 import kotlinx.coroutines.flow.first
@@ -409,7 +410,10 @@ class BackupService(
      *  this is the second net for the import report, in case a
      *  message ever echoes a value. It never logs anything. */
     private fun safeMessage(e: Exception): String {
-        val message = e.message ?: "Unknown error."
+        // Remediation phase 2: truncation alone is not a second
+        // net — a dependency's exception text could carry a
+        // secret. Pattern-scrub first, then truncate.
+        val message = SecretRedactor.scrubFreeText(e.message ?: "Unknown error.")
         return if (message.length > 200) message.substring(0, 200) else message
     }
 

@@ -52,6 +52,43 @@ class SecretRedactorTest {
     }
 
     @Test
+    fun scrubFreeTextWithholdsSecretPatterns() {
+        val withheld = "Details withheld: the error message may contain sensitive text."
+        assertEquals(
+            withheld,
+            SecretRedactor.scrubFreeText("caused by -----BEGIN PRIVATE KEY----- abc")
+        )
+        assertEquals(
+            withheld,
+            SecretRedactor.scrubFreeText("auth header Bearer abcdef123456")
+        )
+        assertEquals(
+            withheld,
+            SecretRedactor.scrubFreeText("failed with token=abc123")
+        )
+        assertEquals(
+            withheld,
+            SecretRedactor.scrubFreeText("saw ghp_abcdefghijklmnopqrstuvwx")
+        )
+    }
+
+    @Test
+    fun scrubFreeTextPassesBenignMessages() {
+        assertEquals(
+            "A credential is required for a new host.",
+            SecretRedactor.scrubFreeText("A credential is required for a new host.")
+        )
+        assertEquals(
+            "Auth fail",
+            SecretRedactor.scrubFreeText("Auth fail")
+        )
+        assertEquals(
+            "Password must not be blank.",
+            SecretRedactor.scrubFreeText("Password must not be blank.")
+        )
+    }
+
+    @Test
     fun wipeZeroesCharArray() {
         val chars = "secret".toCharArray()
         chars.wipe()

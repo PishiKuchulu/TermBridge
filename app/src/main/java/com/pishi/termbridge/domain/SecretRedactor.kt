@@ -11,6 +11,23 @@ package com.pishi.termbridge.domain
  * redacted string. Callers must still never log the original.
  */
 object SecretRedactor {
+    /**
+     * Remediation phase 2: scrub free-form text that may carry
+     * an unknown secret — e.g. a dependency's exception message
+     * surfaced in an import warning. Unlike [redact], there is
+     * no known secret to replace: if the text matches any
+     * obvious-secret pattern, the WHOLE message is withheld
+     * rather than partially redacted, because partial redaction
+     * of an unknown-format secret can leak fragments. Benign
+     * messages pass through unchanged.
+     */
+    fun scrubFreeText(text: String): String =
+        if (SecretScanner.scan(text).isEmpty()) {
+            text
+        } else {
+            "Details withheld: the error message may contain sensitive text."
+        }
+
     fun redact(text: String, secrets: List<String>): String {
         var result = text
         for (secret in secrets) {

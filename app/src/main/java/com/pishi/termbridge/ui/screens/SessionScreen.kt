@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CommandMode
+import com.pishi.termbridge.domain.CommandTemplate
 import com.pishi.termbridge.domain.HostKeyVerification
 import com.pishi.termbridge.terminal.TerminalCell
 import com.pishi.termbridge.terminal.TerminalSnapshot
@@ -97,6 +98,7 @@ fun SessionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val terminalSnapshot by viewModel.terminalSnapshot.collectAsState()
     val commandButtons by viewModel.commandButtons.collectAsState()
+    val blockedMessage by viewModel.blockedMessage.collectAsState()
     val connectedShell by viewModel.connectedShell.collectAsState()
     val connectedShellConfirmed by viewModel.connectedShellConfirmed.collectAsState()
     val activeSequence by viewModel.activeSequence.collectAsState()
@@ -277,6 +279,24 @@ fun SessionScreen(
                             onClick = { viewModel.stopSequence() }
                         )
                     }
+                }
+                // Remediation phase 1: a refused submission
+                // (dialog bypass or stale prepared command)
+                // explains itself here, in the buttons area.
+                blockedMessage?.let { block ->
+                    Text(
+                        text = stringResource(
+                            when (block) {
+                                CommandTemplate.SubmissionBlock.STALE_SHELL ->
+                                    R.string.shell_blocked_stale
+                                CommandTemplate.SubmissionBlock.SHELL_UNCONFIRMED ->
+                                    R.string.shell_blocked_unconfirmed
+                            }
+                        ),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.small))
                 }
                 if (commandButtons.isEmpty()) {
                     Spacer(modifier = Modifier.height(Spacing.small))

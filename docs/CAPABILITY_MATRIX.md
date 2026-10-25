@@ -122,3 +122,29 @@ checklist, SAF round-trip). Until then, "implemented"
 and "verified" must never be interchanged in release
 notes — that is the central discrepancy this audit
 exists to prevent.
+
+## Addendum, 2026-10-25 — remediation (rows above are history, not rewritten)
+
+Gate 1 from the closing paragraph PASSED: CI run #13
+(commit 0ce9772, 2026-10-25) executed the unit suite and
+the emulator instrumented suite green. "NOT RUN" in the
+rows above is therefore stale for the suites that ran —
+but no row is upgraded here, because the matrix's own
+rule reserves status changes for a re-audit, not an
+append.
+
+Test-count delta (by grep, this pass): JVM tests 267 +
+13 new `ShellGateTest` + 2 new `SecretRedactorTest`
+cases = 282. Instrumented methods still total 23, but
+their composition changed: 5 runnable (as before) + 12
+newly implemented `SshIntegrationTest` cases against the
+controlled fixture + 6 still-@Ignore'd stubs with
+specific reasons (see `docs/SSH_INTEGRATION_BLOCKER.md`).
+Gate 2 (fixture) is therefore partially met and pending
+CI proof; gate 3 (device run) is still fully open.
+
+New behaviour since the audit: the shell-confirmation
+gate (remediation phase 1) changes the FR-08-adjacent
+command-button claim — parameterised buttons are now
+refused at the execution boundary while the shell is
+unconfirmed or stale. See `docs/REMEDIATION_REPORT.md`.

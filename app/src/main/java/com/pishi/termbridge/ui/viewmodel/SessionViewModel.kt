@@ -131,6 +131,18 @@ class SessionViewModel(
     private val _pendingRisky = MutableStateFlow<PreparedCommand?>(null)
     val pendingRisky: StateFlow<PreparedCommand?> = _pendingRisky.asStateFlow()
 
+    // Remediation phase 1: the last execution-gate block, if
+    // any. The screen maps this to a user-visible string.
+    // Set only when actOnPrepared refuses a submission (a
+    // dialog bypass or a stale prepared command — the dialog
+    // itself disables its button and explains in place).
+    // Cleared on the next button tap and on disconnect, so a
+    // stale refusal never lingers after a later good action.
+    private val _blockedMessage =
+        MutableStateFlow<CommandTemplate.SubmissionBlock?>(null)
+    val blockedMessage: StateFlow<CommandTemplate.SubmissionBlock?> =
+        _blockedMessage.asStateFlow()
+
     private val _activeSequence = MutableStateFlow<ActiveSequence?>(null)
     val activeSequence: StateFlow<ActiveSequence?> = _activeSequence.asStateFlow()
 
@@ -369,6 +381,7 @@ class SessionViewModel(
         _commandButtons.value = emptyList()
         _actionButton.value = null
         _pendingRisky.value = null
+        _blockedMessage.value = null
         _envStatus.value = null
         _connectedShell.value = com.pishi.termbridge.domain.RemoteShell.POSIX
         _connectedShellConfirmed.value = false
@@ -397,9 +410,14 @@ class SessionViewModel(
     // selection alone, or on dialog open — only on the explicit
     // Run/Insert/confirm tap.
     fun selectButtonForAction(buttonId: Long) {
+        _blockedMessage.value = null
         viewModelScope.launch {
             _actionButton.value = commandRepository.getButton(buttonId)
         }
+    }
+
+    fun clearBlockedMessage() {
+        _blockedMessage.value = null
     }
 
     fun clearActionButton() {
@@ -418,6 +436,25 @@ class SessionViewModel(
      */
     fun actOnPrepared(prepared: PreparedCommand, confirmedRisky: Boolean) {
         if (_uiState.value.status != SessionStatus.CONNECTED || terminalSession == null) {
+            return
+        }
+        // Remediation phase 1 — the execution gate, FIRST,
+        // before the risky dialog and before any submission,
+        // in every mode (insert counts: inserted text becomes
+        // execution when the user presses Enter). The dialog's
+        // disabled button is only a mirror of this check; a
+        // prepared command that reaches here by any other path
+        // — including the risky-confirm re-submission of a
+        // stale prepared object — is refused here, and the
+        // screen explains why and what to do.
+        _blockedMessage.value = null
+        val block = CommandTemplate.blockReason(
+            prepared, _connectedShell.value, _connectedShellConfirmed.value
+        )
+        if (block != null) {
+            _pendingRisky.value = null
+            _actionButton.value = null
+            _blockedMessage.value = block
             return
         }
         if (prepared.isRisky && !confirmedRisky) {
@@ -488,13 +525,16 @@ class SessionViewModel(
 
     /**
      * Pure preparation helper for the parameter dialog preview.
-     * Uses the connected host's shell (security fix 16, H1),
+     * Uses the connected host's shell (security fix 16, H1)
+     * and its confirmation state (remediation phase 1),
      * like the dialog itself does.
      */
     fun preparePreview(
         button: CommandButton,
         supplied: Map<String, String>
-    ): PreparedCommand = CommandTemplate.prepare(button, supplied, _connectedShell.value)
+    ): PreparedCommand = CommandTemplate.prepare(
+        button, supplied, _connectedShell.value, _connectedShellConfirmed.value
+    )
 
     // Terminal input — raw bytes to the shell, not commands.
     fun sendText(text: String) = terminalSession?.sendText(text)

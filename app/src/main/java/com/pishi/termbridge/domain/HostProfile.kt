@@ -23,9 +23,14 @@ data class HostProfile(
     val endpoint: String get() = "$hostname:$port"
 }
 
-/** Credential supplied at save time. Values are wipeable buffers:
- *  callers must wipe them after the repository has consumed them,
- *  and the repository never logs them. */
+/** Credential supplied at save time. The repository never logs
+ *  them. Password CharArrays are wiped by the repository after
+ *  encryption (see HostRepository); the private-key PEM is a
+ *  String, which CANNOT be wiped — the form clears its state
+ *  and the repository drops the reference after encrypting,
+ *  but the characters may linger in memory until garbage
+ *  collection. That asymmetry is inherent to String, not a
+ *  bug to paper over with a "wipeable buffers" claim. */
 sealed class CredentialInput {
     data class Password(val password: CharArray) : CredentialInput()
     data class PrivateKey(val keyPem: String, val passphrase: CharArray?) : CredentialInput()

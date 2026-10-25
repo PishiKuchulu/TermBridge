@@ -565,3 +565,50 @@ strength of code inspection alone: the code reads well
 in the audited paths, but the release gate is still the
 first CI build, the fixture runs, and the H1/M1/M2/M3/M4
 fixes.
+
+## Follow-up, 2026-10-25 — remediation phases 1, 2, 5 (appended, history preserved)
+
+This section does not rewrite the audit above. It records
+what the remediation pass found after it.
+
+- NEW HIGH (fixed, phase 1): the prompt-18 shell warning
+  did not block. A parameterised button could execute
+  while the host's shell was unconfirmed, quoted with the
+  untouched POSIX default — unsafe on cmd.exe hosts. Fix:
+  an execution gate at `actOnPrepared` (the only path to
+  the runner), in every mode including insert-only, plus
+  a disabled dialog button and a surfaced refusal reason.
+  Regression tests: `ShellGateTest` (13 tests). Trust
+  model, stated honestly: "confirmed" is a user assertion
+  in Environment, not an app verification — the app cannot
+  detect a remote shell.
+- NEW LOW (fixed, phase 2): `BackupService.safeMessage`
+  truncated exception text but never scrubbed it, while
+  `SecretRedactor`'s "second net" claim was aspirational
+  (not wired). Fix: pattern-scrub before truncate; a
+  matching message is withheld whole. No secret-bearing
+  exception source was found in the audit — this closes
+  the surface, not a demonstrated leak.
+- DOC CORRECTION (phase 2): `CredentialInput`'s "wipeable
+  buffers" claim was wrong for the private-key PEM, which
+  is a String and cannot be wiped. The doc now says so;
+  the form clears its state and the repo drops the
+  reference after encrypting, but characters may linger
+  until garbage collection.
+- NEW ADVISORIES (assessed, phase 5): OSV reports 4
+  Bouncy Castle advisories on the sshj transitive line
+  (bcprov-jdk18on 1.80.2: GHSA-9pwp, GHSA-c3fc, GHSA-qp49;
+  bcpkix-jdk18on 1.80: GHSA-wg6q; fixed in the 1.84/1.85
+  line). Exposure assessed LOW: the app does no X.509
+  certificate validation and no LDAP; ASN.1 parsing covers
+  user-supplied key material and sshj protocol data. The
+  upgrade path (evaluate sshj 0.41.2 with full CI) is an
+  open follow-up, not a change made here. Direct deps
+  (sshj 0.40.0, Room 2.6.1, coroutines 1.8.1,
+  serialization-json 1.7.3, lifecycle 2.8.7, navigation
+  2.8.0, core-ktx 1.15.0, junit 4.13.2) report no OSV
+  vulnerabilities. This is a spot audit, not a full
+  dependency-tree scan — that gate stays open.
+- The audit's original release caution still stands: a
+  green CI run is not release readiness. See
+  `docs/RELEASE_READINESS.md` for the NO-GO checklist.

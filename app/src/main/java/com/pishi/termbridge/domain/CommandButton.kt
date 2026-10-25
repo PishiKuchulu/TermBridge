@@ -67,7 +67,20 @@ data class PreparedCommand(
     val renderedSteps: List<String> = emptyList(),
     val isRisky: Boolean = false,
     /** Human-readable reason labels (never the command text). */
-    val riskReasons: List<String> = emptyList()
+    val riskReasons: List<String> = emptyList(),
+    /**
+     * Remediation phase 1: the shell the rendered text was
+     * quoted for. The execution gate compares this with the
+     * currently connected shell, so a command prepared for
+     * one shell can never be submitted after a shell change.
+     */
+    val shell: RemoteShell = RemoteShell.POSIX,
+    /**
+     * Remediation phase 1: whether that shell was confirmed
+     * (user-asserted in Environment and saved) at preparation
+     * time. The gate requires this AND current confirmation.
+     */
+    val shellConfirmed: Boolean = false
 ) {
     /** Steps a sequence would submit, or the single command. */
     val textsToSubmit: List<String>

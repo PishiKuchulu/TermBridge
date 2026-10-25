@@ -65,6 +65,67 @@ object CommandTemplate {
     fun warnUnconfirmedShell(hasParameters: Boolean, shellConfirmed: Boolean): Boolean =
         hasParameters && !shellConfirmed
 
+    /**
+     * Remediation phase 1: why a prepared command may NOT be
+     * submitted. The ViewModel maps these to user-visible
+     * strings; the domain layer never holds UI text.
+     */
+    enum class SubmissionBlock {
+        /** Prepared for a different shell than the current one. */
+        STALE_SHELL,
+        /** Shell not confirmed at preparation time or now. */
+        SHELL_UNCONFIRMED
+    }
+
+    /**
+     * Remediation phase 1 — the execution gate. Pure, so it is
+     * unit-testable without a dialog or a ViewModel, and so a
+     * test can prove the restriction while bypassing the UI
+     * entirely (build a PreparedCommand directly and call this).
+     * Returns null when submission is allowed, else the block.
+     *
+     * Rules, in order:
+     * - Parameter-free buttons need no quoting, so they are
+     *   always allowed — the gate never blocks safe commands
+     *   that carry no user-supplied values.
+     * - A command quoted for a different shell than the one
+     *   currently connected is stale: the user must prepare
+     *   it again. This is what makes a shell-state change
+     *   invalidate stale prepared commands.
+     * - A parameterised command is allowed only when the shell
+     *   was confirmed at preparation time AND is confirmed now.
+     *   Either side unconfirmed blocks, in EVERY mode: insert
+     *   counts, because inserted text becomes execution the
+     *   moment the user presses Enter, and a preview quoted
+     *   for the wrong shell cannot be trusted.
+     *
+     * Trust level, stated plainly: "confirmed" means the user
+     * asserted the shell type in Environment and saved it.
+     * The app cannot independently detect a remote shell, so
+     * confirmation is a user assertion, not an app verification.
+     * What this gate guarantees is narrower and real: no
+     * parameterised command is ever submitted while the shell
+     * is not even asserted, or while the prepared text was
+     * quoted for a different shell.
+     *
+     * The dialog's disabled button is only this gate's visible
+     * mirror. Bypassing the dialog cannot bypass the gate,
+     * because SessionViewModel.actOnPrepared — the only path
+     * to the runner — calls this first.
+     */
+    fun blockReason(
+        prepared: PreparedCommand,
+        currentShell: RemoteShell,
+        currentShellConfirmed: Boolean
+    ): SubmissionBlock? {
+        if (prepared.button.variables.isEmpty()) return null
+        if (prepared.shell != currentShell) return SubmissionBlock.STALE_SHELL
+        if (!prepared.shellConfirmed || !currentShellConfirmed) {
+            return SubmissionBlock.SHELL_UNCONFIRMED
+        }
+        return null
+    }
+
     /** Single-quote escape for a POSIX shell word. */
     fun shellQuote(value: String): String = shellQuote(value, RemoteShell.POSIX)
 
@@ -147,14 +208,22 @@ object CommandTemplate {
      * Prepare a button for action without executing anything.
      * [shell] is the connected host's shell: quoting and risky
      * classification are both shell-aware (security fix 16, H1).
-     * Defaults to POSIX so existing callers and tests that do not
-     * know a host's shell keep the old behaviour; the session
-     * dialog always passes the connected host's shell.
+     * [shellConfirmed] is the confirmation state at preparation
+     * time; it defaults to false, the secure default — a caller
+     * that forgets to pass it produces a PreparedCommand the
+     * execution gate will refuse for parameterised buttons.
+     * The POSIX default for [shell] is therefore only a
+     * preview/quoting choice now, never an execution
+     * authorisation: an unconfirmed shell never silently
+     * authorises POSIX quoting at the execution boundary.
+     * The session dialog always passes the connected host's
+     * shell and its confirmation state.
      */
     fun prepare(
         button: CommandButton,
         supplied: Map<String, String>,
-        shell: RemoteShell = RemoteShell.POSIX
+        shell: RemoteShell = RemoteShell.POSIX,
+        shellConfirmed: Boolean = false
     ): PreparedCommand {
         val values = resolveValues(button, supplied)
         return when (button.mode) {
@@ -165,7 +234,9 @@ object CommandTemplate {
                     button = button,
                     rendered = rendered,
                     isRisky = risk.isRisky,
-                    riskReasons = risk.reasons
+                    riskReasons = risk.reasons,
+                    shell = shell,
+                    shellConfirmed = shellConfirmed
                 )
             }
             CommandMode.SEQUENCE -> {
@@ -175,7 +246,9 @@ object CommandTemplate {
                     button = button,
                     renderedSteps = renderedSteps,
                     isRisky = risk.isRisky,
-                    riskReasons = risk.reasons
+                    riskReasons = risk.reasons,
+                    shell = shell,
+                    shellConfirmed = shellConfirmed
                 )
             }
         }

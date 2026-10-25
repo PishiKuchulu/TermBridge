@@ -8,14 +8,17 @@ command buttons, per-host environment settings, SSH tunnels
 import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
-**Status: handoff, NOT a release.** Version
-`0.1.0-foundation` (versionCode 1), database v5. The whole
-tree was written in this environment but has never been
-built, tested, or run on a device here — see
-`docs/RELEASE_NOTES.md` for the release gates that must
-pass first. Nothing in this file claims otherwise.
+**Status: remediation in progress, NOT a release.** Version
+`0.1.0-foundation` (versionCode 1), database v5. CI went
+green for the first time on 2026-10-25 (run #13: unit tests
++ debug assemble + emulator instrumented tests), and a
+9-phase security remediation is underway (see
+`docs/REMEDIATION_REPORT.md`) — but signing, device runs,
+and tier-2 integration tests are still open, so this is
+still not a release. See `docs/RELEASE_NOTES.md` for the
+release gates. Nothing in this file claims otherwise.
 
-## What works in code (all NOT RUN — see release notes)
+## What works (evidence labels in docs/REMEDIATION_REPORT.md)
 
 - Hosts + credentials: Room profiles, Android Keystore
   AES-256-GCM, host-key fingerprint verification
@@ -31,6 +34,15 @@ pass first. Nothing in this file claims otherwise.
   parameters with per-shell quoting (POSIX, PowerShell;
   cmd.exe parameterised buttons refused), risky-command
   second confirmation, secret-scan blocking saves.
+  Since remediation phase 1, a parameterised button is
+  REFUSED at the execution boundary while the host's shell
+  is unconfirmed or the prepared text is stale (shell
+  changed since preparation) — in every mode, including
+  insert-only — and the dialog disables its action button
+  with the reason. "Confirmed" means the user asserted the
+  shell in Environment and saved it; the app cannot detect
+  a remote shell, so confirmation is a user assertion, not
+  an app verification.
 - Environment/paths: per-host env vars (Keystore-encrypted,
   via sshj `setEnvVar`, never `export` injection) and
   working directories (one visible `cd` per shell, SFTP
@@ -71,9 +83,12 @@ JDK 17, compile/target SDK 35, minSdk 26. The committed
 ./gradlew :app:connectedDebugAndroidTest   # needs an emulator/device
 ```
 
-CI (`.github/workflows/android-ci.yml`, never run —
-no repository exists yet): unit-test + debug-assemble
-job, plus an emulator instrumented-test job.
+CI (`.github/workflows/android-ci.yml`): unit-test +
+debug-assemble job, plus an emulator instrumented-test
+job. First green run: #13 on 2026-10-25 (commit
+0ce9772). The instrumented job provisions the SSH
+fixture before the emulator run (remediation phase 7);
+without a fixture the fixture tests skip via Assume.
 
 ## Server prerequisites
 
@@ -95,9 +110,14 @@ job, plus an emulator instrumented-test job.
   hardcoded. Keystore loss means re-entering credentials.
 - Audits: `docs/SECURITY_AUDIT.md` (prompt 16, 13
   findings) + `docs/SECURITY_FIXES_16.md` (fix pass) +
-  `docs/CAPABILITY_CLAIM_AUDIT.md` (prompt 17, 23 rows).
-  Residual gates: dependency-vulnerability scan, first
-  CI build, fixture + device runs.
+  `docs/CAPABILITY_CLAIM_AUDIT.md` (prompt 17, 23 rows) +
+  `docs/REMEDIATION_REPORT.md` (2026-10-25, 9 phases) with
+  `docs/TEST_EVIDENCE.md`, `docs/SECURITY_STATUS.md`, and
+  `docs/RELEASE_READINESS.md`.
+  Residual gates: full dependency-tree scan (OSV spot
+  queries done — 4 Bouncy Castle advisories assessed,
+  see the remediation report), fixture tier-2 tests,
+  device runs, release signing.
 
 ## Licences (shipped runtime dependencies, all Apache 2.0)
 

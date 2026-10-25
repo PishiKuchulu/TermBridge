@@ -228,3 +228,32 @@ session blocked, no background service, tunnel session
 destination-scoped, SFTP/terminal connections separate,
 VNC Auth weak by design, no UI-thread tests, no device
 measurements. None of these is presented as a feature.
+
+## Addendum, 2026-10-25 — remediation (not a release)
+
+CI is green for the first time: run #13 (commit 0ce9772,
+2026-10-25) passed the build job (267 unit tests + debug
+assemble) and the instrumented job (emulator tests). That
+closes gate 1 only. The 9-phase remediation that followed
+is documented in `docs/REMEDIATION_REPORT.md`,
+`docs/TEST_EVIDENCE.md`, `docs/SECURITY_STATUS.md`, and
+`docs/RELEASE_READINESS.md` (decision: NO-GO — see that
+file for the checklist).
+
+What changed since the handoff above:
+
+- Shell-confirmation gate (phase 1): parameterised
+  buttons are refused at the execution boundary while the
+  shell is unconfirmed or stale, in every mode.
+- Exception-message scrubbing (phase 2): import warnings
+  withhold messages matching obvious-secret patterns.
+- SSH fixture (phase 3): `tests/fixture/setup-sshd-fixture.sh`
+  + 12 implemented instrumented integration tests; 6
+  remain @Ignore'd with specific reasons.
+- Dependency spot audit (phase 5): OSV queries over direct
+  deps (clean) + 4 Bouncy Castle advisories on the sshj
+  transitive line, assessed as low exposure, upgrade
+  evaluation left open (sshj 0.41.2 exists).
+- Device runs, release signing, and tier-2 integration
+  tests are still open. Nothing in this addendum makes
+  this a release.

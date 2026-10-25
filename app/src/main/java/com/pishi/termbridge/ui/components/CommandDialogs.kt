@@ -50,11 +50,17 @@ import com.pishi.termbridge.ui.theme.Spacing
  * Prompt 18 (audit-17 R1): [shellConfirmed] false means the
  * host's shell is still the untouched default, so a
  * parameterised button shows a warning above the preview
- * instead of silently applying POSIX quoting. The warning
- * does not block: the user may still run, and is told the
- * fix (set the host's shell in Environment and save).
+ * instead of silently applying POSIX quoting.
+ *
+ * Remediation phase 1: the warning now BLOCKS. When the
+ * button has parameters and the shell is unconfirmed, the
+ * action button is disabled and the warning explains why
+ * and what to do. This disabled button is only the visible
+ * mirror of the execution gate: SessionViewModel.actOnPrepared
+ * re-checks before anything reaches the terminal, so a
+ * bypassed dialog still cannot execute.
  * The secure default is false — a caller that forgets to
- * pass it warns rather than staying silent.
+ * pass it warns and blocks rather than staying silent.
  */
 @Composable
 fun ParameterDialog(
@@ -69,15 +75,22 @@ fun ParameterDialog(
         mutableStateOf(button.variables.associate { it.name to it.defaultValue })
     }
     val prepared: PreparedCommand? = try {
-        CommandTemplate.prepare(button, values, shell)
+        CommandTemplate.prepare(button, values, shell, shellConfirmed)
     } catch (e: IllegalArgumentException) {
         null
     }
     val previewError: String? = try {
-        CommandTemplate.prepare(button, values, shell)
+        CommandTemplate.prepare(button, values, shell, shellConfirmed)
         null
     } catch (e: IllegalArgumentException) {
         e.message
+    }
+    // Remediation phase 1: the execution gate, mirrored in
+    // the UI. Prepared here with the dialog's own shell, so
+    // the stale-shell case cannot arise here — only the
+    // unconfirmed case can — but the same function decides.
+    val submissionBlock = prepared?.let {
+        CommandTemplate.blockReason(it, shell, shellConfirmed)
     }
     val actionLabel = when (button.mode) {
         CommandMode.INSERT_ONLY -> stringResource(R.string.commands_action_insert)
@@ -172,7 +185,7 @@ fun ParameterDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = prepared != null,
+                enabled = prepared != null && submissionBlock == null,
                 onClick = { prepared?.let(onSubmit) }
             ) { Text(actionLabel) }
         },
