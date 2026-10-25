@@ -418,4 +418,4 @@ class VtParser(
 
 /** Render a snapshot line as plain text (for tests and diagnostics). */
 fun List<TerminalCell>.asText(): String =
-    buildString { for (cell in this) append(cell.char) }.trimEnd()
+    buildString { for (cell in this@asText) append(cell.char) }.trimEnd()
