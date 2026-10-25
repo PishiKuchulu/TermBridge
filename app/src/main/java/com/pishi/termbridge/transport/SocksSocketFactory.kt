@@ -18,8 +18,9 @@ import javax.net.SocketFactory
  *
  * Limits, stated plainly: unauthenticated SOCKS only (see
  * ProxyConfig — authenticated SOCKS would need the JVM-global
- * Authenticator). Layered sockets are rejected, not silently
- * downgraded: sshj never asks for them on this path.
+ * Authenticator). No layered-socket handling: plain
+ * SocketFactory defines no layered createSocket overload, and
+ * sshj never asks for one on this path.
  */
 class SocksSocketFactory(proxyHost: String, proxyPort: Int) : SocketFactory() {
     private val proxy = Proxy(
@@ -42,14 +43,16 @@ class SocksSocketFactory(proxyHost: String, proxyPort: Int) : SocketFactory() {
         connect(InetSocketAddress(host, port))
     }
 
+    override fun createSocket(address: InetAddress, port: Int): Socket =
+        Socket(proxy).apply { connect(InetSocketAddress(address, port)) }
+
     override fun createSocket(
-        socket: Socket,
-        host: String,
+        address: InetAddress,
         port: Int,
-        autoClose: Boolean
-    ): Socket {
-        throw UnsupportedOperationException(
-            "Layered sockets are not supported for proxied SSH connections."
-        )
+        localAddress: InetAddress,
+        localPort: Int
+    ): Socket = Socket(proxy).apply {
+        bind(InetSocketAddress(localAddress, localPort))
+        connect(InetSocketAddress(address, port))
     }
 }

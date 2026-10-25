@@ -56,7 +56,7 @@ class CommandsViewModel(
         // Prompt 14: opening a fresh form clears a stale error,
         // so the dialog never shows a previous save's failure.
         _error.value = null
-        _formButton.value = CommandButton(hostId = hostId)
+        _formButton.value = CommandButton(hostId = hostId, label = "")
     }
 
     fun startEdit(id: Long) {

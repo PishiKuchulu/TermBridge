@@ -5,6 +5,7 @@ import java.io.FilterOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.RemoteResourceInfo
 import net.schmizz.sshj.sftp.SFTPClient
 
@@ -140,7 +141,14 @@ class SftpManager(private val connection: SshjConnection) {
         val normalized = RemotePath.normalize(remotePath) ?: throw SftpException(SftpError.NotFound)
         val counting = CountingOutputStream(output, onProgress, isCancelled)
         try {
-            ensureSftp().get(normalized, counting)
+            // sshj 0.40.0 has no get(String, OutputStream):
+            // stream through the remote file's own input stream.
+            val remote = ensureSftp().open(normalized, setOf(OpenMode.READ))
+            try {
+                remote.RemoteFileInputStream().copyTo(counting)
+            } finally {
+                remote.close()
+            }
             counting.flush()
         } catch (e: TransferCancelledException) {
             throw SftpException(SftpError.Cancelled, e)
@@ -161,7 +169,17 @@ class SftpManager(private val connection: SshjConnection) {
         val normalized = RemotePath.normalize(remotePath) ?: throw SftpException(SftpError.NotFound)
         val counting = CountingInputStream(input, onProgress, isCancelled)
         try {
-            ensureSftp().put(counting, normalized)
+            // sshj 0.40.0 has no put(InputStream, String):
+            // stream through the remote file's own output stream.
+            val remote = ensureSftp().open(
+                normalized,
+                setOf(OpenMode.WRITE, OpenMode.CREAT, OpenMode.TRUNC)
+            )
+            try {
+                counting.copyTo(remote.RemoteFileOutputStream())
+            } finally {
+                remote.close()
+            }
         } catch (e: TransferCancelledException) {
             throw SftpException(SftpError.Cancelled, e)
         } catch (e: Exception) {

@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
  * there is no sample or seed data — an empty database shows the
  * empty state, honestly.
  */
-class HostsViewModel(private val repository: HostRepository) : ViewModel {
+class HostsViewModel(private val repository: HostRepository) : ViewModel() {
     val hosts: StateFlow<List<HostProfile>> = repository.getHosts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

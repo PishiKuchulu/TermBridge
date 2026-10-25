@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
 class HostFormViewModel(
     private val repository: HostRepository,
     private val hostId: Long?
-) : ViewModel {
+) : ViewModel() {
     var name by mutableStateOf("")
     var hostname by mutableStateOf("")
     var portText by mutableStateOf("22")

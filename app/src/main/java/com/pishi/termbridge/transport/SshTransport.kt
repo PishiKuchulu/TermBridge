@@ -256,6 +256,13 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                         VerificationOutcome.Reject -> false
                     }
                 }
+
+                // sshj 0.40.0 requires this second verifier
+                // method; this verifier tracks fingerprints,
+                // not algorithms, so there is nothing stored
+                // to report here.
+                override fun findExistingAlgorithms(hostname: String, port: Int): List<String> =
+                    emptyList()
             }
         )
         connectAction()

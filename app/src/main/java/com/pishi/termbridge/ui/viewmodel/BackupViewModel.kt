@@ -30,7 +30,7 @@ import java.io.ByteArrayOutputStream
 class BackupViewModel(
     private val backupService: BackupService,
     private val contentResolver: ContentResolver
-) : ViewModel {
+) : ViewModel() {
     var exportEncrypted by mutableStateOf(false)
     var exportPassphrase by mutableStateOf("")
     var exportConfirmPassphrase by mutableStateOf("")
