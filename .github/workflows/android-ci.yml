@@ -93,6 +93,7 @@ jobs:
           target: google_apis
           arch: x86_64
           script: bash tests/fixture/run-instrumented-with-fixture.sh
+
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v4
