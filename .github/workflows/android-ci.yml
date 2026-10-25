@@ -97,6 +97,7 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.fixture_user=termbridge-test \
               -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD"
       - name: Upload instrumented test reports
+
         if: always()
         uses: actions/upload-artifact@v4
         with:
