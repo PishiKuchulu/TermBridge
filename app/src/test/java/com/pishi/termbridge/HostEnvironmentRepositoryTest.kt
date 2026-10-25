@@ -45,7 +45,7 @@ class HostEnvironmentRepositoryTest {
         repo.saveSettings(
             HostEnvironmentSettings(
                 hostId = 1L,
-                remoteWorkingDirectory = "/home/user",
+                remoteWorkingDirectory = "C:\\Users\\user",
                 remoteShell = RemoteShell.POWERSHELL,
                 shellConfirmed = true
             )

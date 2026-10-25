@@ -15,7 +15,11 @@ package com.pishi.termbridge.domain
  * and each segment is checked, so `ls; rm -rf /` is risky even
  * though its first segment is benign. Matching is case-insensitive
  * for command names. Rendered text (after variable substitution)
- * is what is classified, never the raw template.
+ * is what is classified, never the raw template. Two patterns
+ * span a separator (a pipe) and are matched against the WHOLE
+ * command instead: splitting on '|' first would make a pattern
+ * needing a literal pipe unmatchable (CI run #12: curl|sh was
+ * missed, and the fork-bomb pattern had the same defect).
  *
  * Shell-aware (security fix 16, finding H1): the old pattern set
  * was POSIX-only, so Windows-dangerous commands were never
@@ -38,9 +42,18 @@ object RiskyCommand {
         "shutdown, reboot, or poweroff" to Regex(
             """^\s*(shutdown|reboot|poweroff|halt)\b""",
             RegexOption.IGNORE_CASE
-        ),
+        )
+    )
+
+    // Patterns spanning a separator: matched against the whole
+    // command, never against a segment (see the KDoc above).
+    private val wholeCommandPatterns: List<Pair<String, Regex>> = listOf(
         "download piped directly to a shell" to Regex(
             """\b(curl|wget)\b.*\|\s*(sh|bash|zsh)\b""",
+            RegexOption.IGNORE_CASE
+        ),
+        "fork bomb" to Regex(
+            """:\(\)\s*\{\s*:\|:\s*&\s*\}\s*;""",
             RegexOption.IGNORE_CASE
         )
     )
@@ -72,10 +85,6 @@ object RiskyCommand {
         ),
         "kill all processes or kill process group" to Regex(
             """^\s*(killall|pkill\s+.*-9|kill\s+-9\s+-1)\b""",
-            RegexOption.IGNORE_CASE
-        ),
-        "fork bomb" to Regex(
-            """:\(\)\s*\{\s*:\|:\s*&\s*\}\s*;""",
             RegexOption.IGNORE_CASE
         ),
         "firewall flush or remote-access service stop" to Regex(
@@ -144,6 +153,9 @@ object RiskyCommand {
     fun classify(command: String, shell: RemoteShell = RemoteShell.POSIX): RiskAssessment {
         val patterns = patternsFor(shell)
         val reasons = linkedSetOf<String>()
+        for ((reason, regex) in wholeCommandPatterns) {
+            if (regex.containsMatchIn(command)) reasons += reason
+        }
         for (segment in splitSegments(command)) {
             for ((reason, regex) in patterns) {
                 if (regex.containsMatchIn(segment)) reasons += reason

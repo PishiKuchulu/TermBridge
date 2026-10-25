@@ -284,7 +284,11 @@ class BackupServiceTest {
             CredentialInput.Password("jump-password-789".toCharArray())
         )
         source.advancedRepo.saveJumpChain(JumpChain(host.id, listOf(hop.id)))
-        val text = source.service.buildExport(false, null)
+        // Encrypted export: a non-secret export carries no
+        // credential, and a NEW host cannot import without one
+        // (HostValidator requires a credential for a new host),
+        // so the chain-skipped scenario needs credentials to travel.
+        val text = source.service.buildExport(true, "correct-horse-battery".toCharArray())
 
         val target = BackupWorld()
         // Only the hop host already exists, so it is skipped; the
@@ -296,7 +300,9 @@ class BackupServiceTest {
             ),
             CredentialInput.Password("existing-password".toCharArray())
         )
-        val preview = target.service.parseForPreview(text, null)
+        val preview = target.service.parseForPreview(
+            text, "correct-horse-battery".toCharArray()
+        )
         val result = target.service.applyImport(preview, false)
         assertTrue(result.importedNames.contains("Home server"))
         assertTrue(result.skippedNames.contains("Jump box"))

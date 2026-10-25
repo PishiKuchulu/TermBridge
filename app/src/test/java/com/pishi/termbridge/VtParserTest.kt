@@ -46,8 +46,10 @@ class VtParserTest {
         assertEquals("", parser.snapshot().lines[0].asText())
         parser.feed("abc\u001B[1;3H*")
         val snapshot = parser.snapshot()
-        // '*' overwrites 'c' at row 1, column 3 (1-based).
-        assertEquals("ab*", snapshot.lines[0].asText())
+        // EL (2K) erases the line but does NOT move the cursor
+        // (VT semantics), so "abc" lands at columns 5-7 and the
+        // 1;3H '*' lands at column 2 (0-based), overwriting a space.
+        assertEquals("  *  abc", snapshot.lines[0].asText())
     }
 
     @Test
