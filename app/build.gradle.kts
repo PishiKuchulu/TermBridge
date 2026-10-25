@@ -53,10 +53,13 @@ android {
 
     packaging {
         resources {
-            // No SSH/crypto library is on the classpath yet; these
-            // exclusions are the standard Android defaults, kept so a
-            // future dependency cannot break the build on META-INF.
+            // Standard Android defaults, plus the OSGi manifest
+            // that sshj's Bouncy Castle jars each ship under
+            // META-INF/versions/9 (duplicate across bcprov,
+            // bcpkix, bcutil; unused on Android, so excluding
+            // it cannot change runtime behaviour).
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
 }
