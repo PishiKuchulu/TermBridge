@@ -10,7 +10,6 @@ import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -281,7 +280,7 @@ class MigrationSqlAuditTest {
         val match = Regex(
             """(?i)CREATE TABLE IF NOT EXISTS `?(\w+)`?\s*\((.*)\)\s*$""",
             RegexOption.DOT_MATCHES_ALL
-        ).find(sql) ?: fail("Not a CREATE TABLE statement: $sql")
+        ).find(sql) ?: throw AssertionError("Not a CREATE TABLE statement: $sql")
         val name = match.groupValues[1]
         val columns = mutableListOf<ColumnDef>()
         var tablePk: List<String> = emptyList()
@@ -291,7 +290,7 @@ class MigrationSqlAuditTest {
                 part.startsWith("FOREIGN KEY", ignoreCase = true) -> {
                     val fk = Regex(
                         """(?i)FOREIGN KEY\s*\(`?(\w+)`?\)\s*REFERENCES\s+`?(\w+)`?\s*\(`?(\w+)`?\)"""
-                    ).find(part) ?: fail("Unparseable FOREIGN KEY: $part")
+                    ).find(part) ?: throw AssertionError("Unparseable FOREIGN KEY: $part")
                     fks += ForeignKeyDef(
                         fk.groupValues[1], fk.groupValues[2], fk.groupValues[3],
                         part.contains("ON DELETE CASCADE", ignoreCase = true)
@@ -320,7 +319,7 @@ class MigrationSqlAuditTest {
     private fun parseCreateIndex(sql: String): IndexDef {
         val match = Regex(
             """(?i)CREATE\s+(UNIQUE\s+)?INDEX\s+IF NOT EXISTS\s+`?(\w+)`?\s+ON\s+`?(\w+)`?\s*\(([^)]*)\)"""
-        ).find(sql) ?: fail("Not a CREATE INDEX statement: $sql")
+        ).find(sql) ?: throw AssertionError("Not a CREATE INDEX statement: $sql")
         return IndexDef(
             name = match.groupValues[2],
             table = match.groupValues[3],
@@ -377,7 +376,7 @@ class MigrationSqlAuditTest {
     private fun parseAlterAddColumn(sql: String): AlterDef {
         val match = Regex(
             """(?i)ALTER TABLE `?(\w+)`? ADD COLUMN `?(\w+)`? (\w+)(.*)"""
-        ).find(sql) ?: fail("Not an ALTER TABLE ... ADD COLUMN statement: $sql")
+        ).find(sql) ?: throw AssertionError("Not an ALTER TABLE ... ADD COLUMN statement: $sql")
         val rest = match.groupValues[4]
         val default = Regex("""(?i)DEFAULT\s+(\S+)""").find(rest)?.groupValues?.get(1)
         return AlterDef(
@@ -510,7 +509,7 @@ class MigrationSqlAuditTest {
             }
             for (idx in indices) {
                 val cols = knownTables[idx.table]
-                    ?: fail("Index ${idx.name} references unknown table ${idx.table}")
+                    ?: throw AssertionError("Index ${idx.name} references unknown table ${idx.table}")
                 for (c in idx.columns) {
                     assertTrue(
                         "Index ${idx.name} references unknown column ${idx.table}.$c",

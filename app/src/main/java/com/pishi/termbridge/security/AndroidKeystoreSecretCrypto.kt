@@ -7,7 +7,6 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import java.security.SecureRandom
 
 /**
  * Platform Keystore + AES-256-GCM secret protection.
@@ -56,10 +55,15 @@ class AndroidKeystoreSecretCrypto : SecretCrypto {
     }
 
     override fun encrypt(plaintext: ByteArray): ByteArray {
-        val iv = ByteArray(IV_BYTES).also { SecureRandom().nextBytes(it) }
+        // AndroidKeyStore with setRandomizedEncryptionRequired(true)
+        // rejects caller-provided IVs for encryption
+        // ("Caller-provided IV not permitted", CI run #11): the IV
+        // must come from the Keystore itself. Blob layout is
+        // unchanged (IV || ciphertext), so decrypt is untouched.
         val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.ENCRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+            init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         }
+        val iv = cipher.iv
         val ciphertext = cipher.doFinal(plaintext)
         return iv + ciphertext
     }
