@@ -100,7 +100,7 @@ jobs:
       - name: Run instrumented tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 29
+          api-level: 33
           target: google_apis
           arch: x86_64
           script: bash tests/fixture/run-instrumented-with-fixture.sh
