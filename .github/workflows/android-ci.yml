@@ -103,6 +103,8 @@ jobs:
           api-level: 33
           target: google_apis
           arch: x86_64
+          cores: 4
+          ram-size: 4096M
           script: bash tests/fixture/run-instrumented-with-fixture.sh
 
       - name: Upload instrumented test reports
