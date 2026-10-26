@@ -68,7 +68,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-          # Run #22 follow-up: the emulator died at startup with
+      # Run #22 follow-up: the emulator died at startup with
       # "Not enough space to create userdata partition" (need
       # 7372.80 MB, ~6979 MB free). Free several GB BEFORE any tool
       # is installed: this step runs first so setup-java can
@@ -76,10 +76,10 @@ jobs:
       # evidence. None of these directories are used by this job.
       - name: Free disk space for the emulator
         run: |
-            df -h
-                sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /opt/az /usr/local/share/boost /usr/share/swift 2>/dev/null || true
-                    df -h
-                    - name: Set up JDK 17
+          df -h
+          sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /opt/az /usr/local/share/boost /usr/share/swift 2>/dev/null || true
+          df -h
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
