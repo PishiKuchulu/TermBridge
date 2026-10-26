@@ -41,6 +41,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
@@ -49,6 +55,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -593,6 +600,15 @@ private fun TerminalView(
                 label = stringResource(R.string.terminal_key_esc),
                 onClick = { viewModel.sendEscape() }
             )
+            // Review #1 (C-03): the guaranteed Backspace path.
+            // Soft keyboards do not reliably deliver a Backspace
+            // key event (or a value change) for an empty capture
+            // field, so the button — not the field — is what a
+            // user can always rely on.
+            ControlButton(
+                label = "⌫",
+                onClick = { viewModel.sendBackspace() }
+            )
             ControlButton(label = "↑", onClick = { viewModel.sendArrowUp() })
             ControlButton(label = "↓", onClick = { viewModel.sendArrowDown() })
             ControlButton(label = "←", onClick = { viewModel.sendArrowLeft() })
@@ -647,11 +663,70 @@ private fun TerminalView(
             label = { Text(stringResource(R.string.terminal_input_hint)) },
             singleLine = true,
             enabled = inputEnabled,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            // Review #1 (C-03): no autocorrect, no IME learning
+            // (a terminal capture field must not leak keystrokes
+            // into suggestions), and hardware keys are handled
+            // here — the old field had no key handling at all, so
+            // hardware Backspace/arrows/Tab/Ctrl-letters did nothing.
+            // Note, stated honestly: a soft keyboard's Backspace on
+            // this always-empty field still may not arrive as a key
+            // event (IME-dependent); the ⌫ button above is the
+            // guaranteed path.
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Send,
+                autoCorrectEnabled = false,
+                keyboardType = KeyboardType.Password
+            ),
             keyboardActions = KeyboardActions(onSend = { viewModel.sendEnter() }),
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    if (!inputEnabled || event.type != KeyEventType.KeyDown) {
+                        return@onPreviewKeyEvent false
+                    }
+                    when (event.key) {
+                        Key.Backspace -> {
+                            viewModel.sendBackspace(); true
+                        }
+                        Key.Enter -> {
+                            viewModel.sendEnter(); true
+                        }
+                        Key.Tab -> {
+                            viewModel.sendTab(); true
+                        }
+                        Key.DirectionUp -> {
+                            viewModel.sendArrowUp(); true
+                        }
+                        Key.DirectionDown -> {
+                            viewModel.sendArrowDown(); true
+                        }
+                        Key.DirectionLeft -> {
+                            viewModel.sendArrowLeft(); true
+                        }
+                        Key.DirectionRight -> {
+                            viewModel.sendArrowRight(); true
+                        }
+                        Key.Escape -> {
+                            viewModel.sendEscape(); true
+                        }
+                        Key.C -> {
+                            if (event.isCtrlPressed) {
+                                viewModel.sendCtrlC(); true
+                            } else {
+                                false
+                            }
+                        }
+                        Key.D -> {
+                            if (event.isCtrlPressed) {
+                                viewModel.sendCtrlD(); true
+                            } else {
+                                false
+                            }
+                        }
+                        else -> false
+                    }
+                }
         )
     }
 }

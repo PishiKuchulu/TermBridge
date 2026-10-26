@@ -27,6 +27,8 @@ import com.pishi.termbridge.transport.SshTransportException
 import com.pishi.termbridge.transport.SshTunnelManager
 import com.pishi.termbridge.transport.TunnelException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -407,11 +409,23 @@ class AdvancedViewModel(
         sessionJob?.cancel()
         activeJob?.cancel()
         // Forwards first, then the client — the fixed stop order.
-        tunnelManager?.close(tunnelConnection)
+        // Review #1 (C-02): closing forwards and disconnecting
+        // sends socket traffic, so it runs on IO.
+        val managerToClose = tunnelManager
+        val connectionToClose = tunnelConnection
         tunnelManager = null
-        tunnelConnection?.disconnect()
         tunnelConnection = null
         decisionDeferred?.complete(false)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                managerToClose?.close(connectionToClose)
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
         _activeTunnels.value = emptyList()
         _sessionStatus.value = TunnelSessionStatus.IDLE
         _sessionError.value = null
@@ -437,10 +451,23 @@ class AdvancedViewModel(
         sessionJob?.cancel()
         activeJob?.cancel()
         configJob?.cancel()
-        tunnelManager?.close(tunnelConnection)
+        // viewModelScope is already cancelled here, so teardown
+        // network I/O uses a detached IO scope (best-effort).
+        // Review #1 (C-02).
+        val managerToClose = tunnelManager
+        val connectionToClose = tunnelConnection
         tunnelManager = null
-        tunnelConnection?.disconnect()
         tunnelConnection = null
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                managerToClose?.close(connectionToClose)
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
         super.onCleared()
     }
 }

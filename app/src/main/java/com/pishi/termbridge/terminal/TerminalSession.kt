@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +49,20 @@ class TerminalSession(
     private var session: Session? = null
     private var readerJob: Job? = null
     private var closed = false
+
+    /**
+     * Review #1 (C-02): all shell writes go through this channel,
+     * drained by a single writer coroutine on Dispatchers.IO.
+     * [sendBytes] only enqueues — it never touches the socket, so
+     * calling it from a Compose handler (main thread) cannot throw
+     * NetworkOnMainThreadException and cannot silently drop keys
+     * into a swallowed catch. The channel is UNLIMITED and
+     * single-consumer, so byte order is preserved exactly. The
+     * channel is recreated on every [start] so a previous [close]
+     * cannot leave stale bytes for a later shell.
+     */
+    private var writeChannel = Channel<ByteArray>(Channel.UNLIMITED)
+    private var writerJob: Job? = null
 
     /** Called once when the shell ends (EOF or error). Null
      *  argument = clean EOF (server closed the shell). */
@@ -102,6 +117,21 @@ class TerminalSession(
             onEnvResult?.invoke(
                 EnvApplyResult(appliedNames = applied, rejectedNames = rejected)
             )
+            writeChannel = Channel(Channel.UNLIMITED)
+            writerJob = CoroutineScope(Dispatchers.IO).launch {
+                for (bytes in writeChannel) {
+                    try {
+                        sess.outputStream.write(bytes)
+                        sess.outputStream.flush()
+                    } catch (e: Exception) {
+                        // A failed write means the shell is dead:
+                        // surface it the same way the reader loop
+                        // does, unless this was an intentional
+                        // close (closed == true suppresses it).
+                        if (!closed) notifyClosed(e)
+                    }
+                }
+            }
             readerJob = CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val reader = InputStreamReader(sess.inputStream, StandardCharsets.UTF_8)
@@ -129,13 +159,11 @@ class TerminalSession(
     }
 
     fun sendBytes(bytes: ByteArray) {
-        try {
-            session?.outputStream?.write(bytes)
-            session?.outputStream?.flush()
-        } catch (_: Exception) {
-            // A failed write on a dead shell is surfaced by the
-            // reader loop's close notification, not by a crash here.
-        }
+        // Never touches the socket: enqueue for the IO writer.
+        // When no shell is running, bytes are dropped, exactly as
+        // the old null-session no-op did.
+        if (session == null) return
+        writeChannel.trySend(bytes)
     }
 
     fun sendText(text: String) {
@@ -165,9 +193,19 @@ class TerminalSession(
         _snapshot.value = parser.snapshot()
     }
 
+    /**
+     * Close the shell channel. Callers must call this off the main
+     * thread: closing sends SSH_MSG_CHANNEL_CLOSE over the socket
+     * (see SessionViewModel.disconnect, which launches IO, and
+     * onCleared, which uses a detached IO scope). The writer is
+     * cancelled first so no queued bytes are written to a closing
+     * channel.
+     */
     fun close() {
         closed = true
         readerJob?.cancel()
+        writerJob?.cancel()
+        writeChannel.close()
         try {
             session?.close()
         } catch (_: Exception) {

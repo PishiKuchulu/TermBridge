@@ -103,15 +103,22 @@ class SftpManager(private val connection: SshjConnection) {
         }
     }
 
-    fun delete(path: String) {
+    /**
+     * Delete a file or an (empty) directory. Review #1 (H-08): the
+     * old code called `rm` for everything, but OpenSSH returns
+     * Failure for SSH_FXP_REMOVE on a directory — even an empty
+     * one — so directory delete could never succeed. Directories
+     * go through SSH_FXP_RMDIR, which still refuses non-empty
+     * directories: there is no recursive delete here, by design.
+     */
+    fun delete(path: String, isDirectory: Boolean) {
         val normalized = RemotePath.normalize(path) ?: throw SftpException(SftpError.NotFound)
         try {
-            // sshj SFTPClient.rm handles files; for directories it
-            // succeeds only when empty (server-side). A non-empty
-            // directory failure surfaces as a generic error with
-            // a clear message from the caller, not a silent partial
-            // delete — there is no recursive delete here.
-            ensureSftp().rm(normalized)
+            if (isDirectory) {
+                ensureSftp().rmdir(normalized)
+            } else {
+                ensureSftp().rm(normalized)
+            }
         } catch (e: Exception) {
             throw SftpException(mapError(e), e)
         }

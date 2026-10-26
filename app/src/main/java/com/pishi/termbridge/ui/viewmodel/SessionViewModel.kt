@@ -27,6 +27,8 @@ import com.pishi.termbridge.transport.SshTransport
 import com.pishi.termbridge.transport.SshTransportException
 import com.pishi.termbridge.transport.SshjConnection
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -387,13 +389,25 @@ class SessionViewModel(
         _connectedShellConfirmed.value = false
         // Terminal channel first, then transport — so the reader
         // loop does not report a "connection lost" for an intentional
-        // disconnect.
-        terminalSession?.close()
+        // disconnect. Review #1 (C-02): closing sends
+        // SSH_MSG_CHANNEL_CLOSE / SSH_MSG_DISCONNECT over the socket,
+        // so it runs on IO, never on the calling (main) thread.
+        val sessionToClose = terminalSession
+        val connectionToClose = connection
         terminalSession = null
         _terminalSnapshot.value = null
-        connection?.disconnect()
         connection = null
         decisionDeferred?.complete(false)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                sessionToClose?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
         _uiState.value = _uiState.value.copy(
             status = SessionStatus.IDLE,
             connectedHost = null,
@@ -553,10 +567,23 @@ class SessionViewModel(
     override fun onCleared() {
         sequenceJob?.cancel()
         buttonsJob?.cancel()
-        terminalSession?.close()
+        // viewModelScope is already cancelled here, so teardown
+        // network I/O uses a detached IO scope (best-effort).
+        // Review #1 (C-02): same socket-write reason as disconnect().
+        val sessionToClose = terminalSession
+        val connectionToClose = connection
         terminalSession = null
-        connection?.disconnect()
         connection = null
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                sessionToClose?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
         _envStatus.value = null
         _connectedShellConfirmed.value = false
         super.onCleared()

@@ -26,6 +26,7 @@ import com.pishi.termbridge.transport.SshTransportException
 import com.pishi.termbridge.transport.SshjConnection
 import java.io.OutputStream
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -260,18 +261,27 @@ class FilesViewModel(
     fun disconnect() {
         transferJob?.cancel()
         transferCancelled = true
-        try {
-            sftpManager?.close()
-        } catch (_: Exception) {
-        }
+        // Review #1 (C-02): SFTP/transport close sends socket
+        // traffic, so it runs on IO, never on the calling thread.
+        val managerToClose = sftpManager
+        val connectionToClose = connection
         sftpManager = null
-        connection?.disconnect()
         connection = null
         decisionDeferred?.complete(false)
         pendingUploadUri = null
         pendingUploadName = null
         pendingDownloadEntry = null
         _uiState.value = FilesUiState(selectedHostId = _uiState.value.selectedHostId)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                managerToClose?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun cancel() {
@@ -375,7 +385,7 @@ class FilesViewModel(
         val manager = sftpManager ?: return
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { manager.delete(entry.path) }
+                withContext(Dispatchers.IO) { manager.delete(entry.path, entry.isDirectory) }
                 refresh()
             } catch (e: SftpException) {
                 _uiState.value = _uiState.value.copy(
@@ -623,11 +633,23 @@ class FilesViewModel(
     }
 
     override fun onCleared() {
-        try {
-            sftpManager?.close()
-        } catch (_: Exception) {
+        // viewModelScope is already cancelled here, so teardown
+        // network I/O uses a detached IO scope (best-effort).
+        // Review #1 (C-02).
+        val managerToClose = sftpManager
+        val connectionToClose = connection
+        sftpManager = null
+        connection = null
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                managerToClose?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
+            }
         }
-        connection?.disconnect()
         super.onCleared()
     }
 }

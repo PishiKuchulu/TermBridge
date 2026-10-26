@@ -7,6 +7,7 @@ import java.security.PublicKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.schmizz.sshj.SSHClient
+import net.schmizz.sshj.userauth.password.PasswordUtils
 import net.schmizz.sshj.connection.channel.direct.DirectConnection
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
 
@@ -273,8 +274,19 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
             }
             AuthType.PRIVATE_KEY -> {
                 val pem = String(credential, Charsets.UTF_8)
-                val passphraseText = passphrase?.let { String(it) }
-                val keyProvider = client.loadKeys(pem, passphraseText)
+                // Review #1 (C-01): the two-argument loadKeys
+                // overload takes a FILE LOCATION, not PEM text
+                // (and NPEs on a null passphrase). The
+                // three-argument overload parses the PEM content
+                // itself — verified against sshj 0.40.0 bytecode
+                // (detectKeyFileFormat sniffs "-----BEGIN" in the
+                // string). The finder holds the request's own
+                // passphrase array: it is used exactly once, during
+                // this auth, and the caller wipes it in `finally`
+                // below, so no copy is made (a copy would linger
+                // if sshj did not wipe it).
+                val finder = passphrase?.let { PasswordUtils.createOneOff(it) }
+                val keyProvider = client.loadKeys(pem, null, finder)
                 client.authPublickey(profile.username, keyProvider)
             }
         }

@@ -274,6 +274,32 @@ class SshIntegrationTest {
     }
 
     @Test
+    fun sftpDeleteRemovesFileAndEmptyDirectory() = runTest {
+        SshFixture.assumeAvailable()
+        val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
+        val sftp = SftpManager(asSshj(conn))
+        try {
+            // File delete goes through rm.
+            val file = uniqueRemote("todelete.bin")
+            sftp.upload(ByteArrayInputStream("x".toByteArray()), file, {}, { false })
+            assertNotNull(sftp.statSize(file))
+            sftp.delete(file, false)
+            assertNull(sftp.statSize(file))
+            // Empty-directory delete goes through rmdir. Review #1
+            // (H-08): plain rm fails on directories on OpenSSH,
+            // even empty ones, so this is the regression test.
+            val dirName = "termbridge-it-${UUID.randomUUID()}-todeletedir"
+            sftp.mkdir("/tmp", dirName)
+            val dir = "/tmp/$dirName"
+            sftp.delete(dir, true)
+            assertNull(sftp.statSize(dir))
+        } finally {
+            sftp.close()
+            conn.disconnect()
+        }
+    }
+
+    @Test
     fun sftpZeroByteUnicodeConflictAndCancellation() = runTest {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
