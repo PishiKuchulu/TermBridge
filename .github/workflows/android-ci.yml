@@ -113,3 +113,9 @@ jobs:
         with:
           name: instrumented-test-reports
           path: app/build/outputs/androidTest-results/connected/
+
+      - name: Dump AVD config (duplicate-key probe)
+        if: always()
+        run: |
+          cat /home/runner/.android/avd/test.avd/config.ini || echo "NO_AVD_CONFIG"
+          grep -n "hw.cpu.ncore\|hw.ramSize" /home/runner/.android/avd/test.avd/config.ini || true
