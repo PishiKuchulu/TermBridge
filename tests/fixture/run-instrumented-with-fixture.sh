@@ -17,8 +17,12 @@
 #      echoed, never logged, never committed).
 #   2. Provisions the dedicated fixture sshd
 #      (tests/fixture/setup-sshd-fixture.sh).
-#   3. Runs the instrumented tests with the fixture
+#   3. Runs a non-fatal pre-Gradle device probe (PropertyFetcher
+#      diagnosis) and then the instrumented tests with the fixture
 #      coordinates as instrumentation arguments.
+#   4. If Gradle fails, re-probes device state (post-failure probe)
+#      and exits with Gradle's original code, so the job still
+#      fails honestly.
 #
 # The password lives only in this process on the ephemeral
 # CI runner. No `set -x`: nothing here may echo it.
@@ -63,8 +67,39 @@ sed -n '1,20p' /tmp/termbridge-probe-getprop.txt 2>/dev/null || true
 echo "PROBE: sdk=$(timeout 60 "$ADB_BIN" -s emulator-5554 shell getprop ro.build.version.sdk 2>/dev/null || echo 'TIMEOUT_OR_ERROR')"
 # --- End diagnostic probe ---
 
+# Gradle runs with errexit suspended so its exit code can be captured
+# for the post-failure probe below; a failing Gradle must NOT abort
+# the script before diagnostics run.
+set +e
 ./gradlew :app:connectedDebugAndroidTest --stacktrace \
   -Pandroid.testInstrumentationRunnerArguments.fixture_host=10.0.2.2 \
   -Pandroid.testInstrumentationRunnerArguments.fixture_port=2222 \
   -Pandroid.testInstrumentationRunnerArguments.fixture_user=termbridge-test \
   -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD"
+GRADLE_RC=$?
+set -e
+
+# --- Post-failure probe (PropertyFetcher investigation, run #25) ---
+# Run #25 proved the PRE-Gradle probe answers (full getprop rc=0, 4s,
+# 330 lines, sdk=29) while Gradle's own property query still fails.
+# This probe answers the remaining question: is adbd STILL answering
+# after Gradle fails, or does something degrade during the build?
+# It runs ONLY when Gradle fails, and every command is guarded so
+# diagnostics can never mask Gradle's result. The script then exits
+# with Gradle's original code, so a failed run still fails honestly.
+if [ "$GRADLE_RC" -ne 0 ]; then
+  echo "POSTFAIL: gradle rc=$GRADLE_RC — re-probing device state"
+  timeout 60 "$ADB_BIN" -s emulator-5554 devices -l 2>&1 | sed 's/^/POSTFAIL: devices: /' || true
+  POSTFAIL_T0="$(date +%s)"
+  if timeout 120 "$ADB_BIN" -s emulator-5554 shell getprop > /tmp/termbridge-postfail-getprop.txt 2>/tmp/termbridge-postfail-getprop.err; then
+    POSTFAIL_RC=0
+  else
+    POSTFAIL_RC=$?
+  fi
+  POSTFAIL_T1="$(date +%s)"
+  echo "POSTFAIL: full getprop rc=$POSTFAIL_RC elapsed=$((POSTFAIL_T1 - POSTFAIL_T0))s lines=$(wc -l < /tmp/termbridge-postfail-getprop.txt 2>/dev/null || echo '?')"
+  echo "POSTFAIL: sdk=$(timeout 60 "$ADB_BIN" -s emulator-5554 shell getprop ro.build.version.sdk 2>/dev/null || echo 'TIMEOUT_OR_ERROR')"
+fi
+# --- End post-failure probe ---
+
+exit "$GRADLE_RC"
