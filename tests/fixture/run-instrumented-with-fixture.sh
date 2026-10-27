@@ -146,6 +146,35 @@ if [ "$GRADLE_RC" -ne 0 ]; then
   POSTFAIL_T1="$(date +%s)"
   echo "POSTFAIL: full getprop rc=$POSTFAIL_RC elapsed=$((POSTFAIL_T1 - POSTFAIL_T0))s lines=$(wc -l < /tmp/termbridge-postfail-getprop.txt 2>/dev/null || echo '?')"
   echo "POSTFAIL: sdk=$(timeout 60 "$ADB_BIN" -s emulator-5554 shell getprop ro.build.version.sdk 2>/dev/null || echo 'TIMEOUT_OR_ERROR')"
+  # --- Server-side fixture state (run #32 diagnosis) ---
+  # Run #32's artifact proved the tests used the right endpoint
+  # (10.0.2.2:2222) but could NOT name the connect failure: the app
+  # deliberately drops the sshj cause chain (SshTransportException
+  # has no cause parameter, by security design), so the XML, logcat,
+  # and UTP logs all show only the fixed "Network error" message.
+  # The fixture sshd log is the only record that can say whether
+  # the guest's connections reached the server at all, and at which
+  # step they failed. Capture it here, guarded like everything else
+  # in this probe: diagnostics must never mask Gradle's result, and
+  # nothing here echoes the fixture password (sshd never logs it).
+  if [ -f /tmp/termbridge-sshd-fixture/sshd.pid ]; then
+    POSTFAIL_SSHD_PID="$(cat /tmp/termbridge-sshd-fixture/sshd.pid 2>/dev/null || echo '?')"
+    echo "POSTFAIL: fixture sshd pid file: $POSTFAIL_SSHD_PID"
+    if sudo kill -0 "$POSTFAIL_SSHD_PID" 2>/dev/null; then
+      echo "POSTFAIL: fixture sshd process is still running"
+    else
+      echo "POSTFAIL: fixture sshd process is NOT running"
+    fi
+  else
+    echo "POSTFAIL: fixture sshd pid file is missing"
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | grep ":2222 " | sed 's/^/POSTFAIL: listening: /' || echo "POSTFAIL: nothing listening on port 2222 (host ss view)"
+  fi
+  echo "POSTFAIL: fixture sshd.log follows (server side of every connection attempt)"
+  sudo cat /tmp/termbridge-sshd-fixture/sshd.log 2>/dev/null | sed 's/^/POSTFAIL: sshd: /' || echo "POSTFAIL: sshd.log unavailable"
+  echo "POSTFAIL: end of fixture sshd.log"
+  # --- End server-side fixture state ---
 fi
 # --- End post-failure probe ---
 
