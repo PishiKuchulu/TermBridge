@@ -20,8 +20,8 @@
 #   3. Runs a non-fatal pre-Gradle device probe (PropertyFetcher
 #      diagnosis) and then the instrumented tests with the fixture
 #      coordinates as instrumentation arguments. The Gradle run is
-#      retried (up to 3 attempts total) ONLY on the flaky
-#      PropertyFetcher / Unknown-API-Level signature — see below.
+#      retried (up to 3 attempts total) ONLY on flaky first-contact
+#      signatures — see below.
 #   4. If Gradle fails, re-probes device state (post-failure probe)
 #      and exits with Gradle's original code, so the job still
 #      fails honestly.
@@ -73,7 +73,7 @@ echo "PROBE: sdk=$(timeout 60 "$ADB_BIN" -s emulator-5554 shell getprop ro.build
 # for the post-failure probe below; a failing Gradle must NOT abort
 # the script before diagnostics run.
 #
-# --- Retry on the flaky property-fetch signature (run #30) ---
+# --- Retry on flaky first-contact signatures (runs #30, #31) ---
 # Run #30 proved the stall is transient and Gradle-side: the adb CLI
 # full getprop answered in 2s (331 lines, sdk=29) before Gradle, and
 # again in 3s (332 lines) after Gradle failed — yet Gradle's own
@@ -85,9 +85,19 @@ echo "PROBE: sdk=$(timeout 60 "$ADB_BIN" -s emulator-5554 shell getprop ro.build
 # so any initial-output stall longer than 2s fails it even when the
 # full output would arrive just after. And the fetch is
 # intermittent, not deterministic: runs #26 and #29 got past it on
-# the same class of setup. So: retry the connected task when — and
-# ONLY when — the attempt log shows the "Unknown API Level" /
-# "PropertyFetcher" signature. A run that actually executes tests
+# the same class of setup.
+# Run #31 proved the NEXT gate is the same kind of race: attempt 1
+# hit the property-fetch signature and retried as designed, and
+# attempt 2 got PAST property fetch to APK installation — then the
+# installer saw API level=1 ("Cannot install split APKs with API
+# level < 21") while the post-failure probe again showed the real
+# device at sdk=29. That is the known ddmlib fail-open: the
+# installer's version check reads DEFAULT(1) when properties are
+# not yet populated at its first call. Attempt 2 was fast (1m 22s,
+# 65 tasks up-to-date), so retries stay cheap. So: retry the
+# connected task when — and ONLY when — the attempt log shows one
+# of the two first-contact signatures (property fetch OR split-APK
+# API-level-1 install). A run that actually executes tests
 # (pass or fail) is never retried, so real failures still fail
 # honestly. Each retry reuses the warm daemon and up-to-date
 # tasks, so it reaches device selection in ~1-2 min.
@@ -105,8 +115,8 @@ while [ "$ATTEMPT" -le 3 ]; do
   if [ "$GRADLE_RC" -eq 0 ]; then
     break
   fi
-  if [ "$ATTEMPT" -lt 3 ] && grep -q -e "Unknown API Level" -e "PropertyFetcher" "gradle-attempt-$ATTEMPT.log"; then
-    echo "GRADLE_ATTEMPT: $ATTEMPT failed on the flaky property-fetch signature; retrying in 30s"
+  if [ "$ATTEMPT" -lt 3 ] && grep -q -e "Unknown API Level" -e "PropertyFetcher" -e "Cannot install split APKs" "gradle-attempt-$ATTEMPT.log"; then
+    echo "GRADLE_ATTEMPT: $ATTEMPT failed on a flaky first-contact signature; retrying in 30s"
     sleep 30
     ATTEMPT=$((ATTEMPT + 1))
     continue
