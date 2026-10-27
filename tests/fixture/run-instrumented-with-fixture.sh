@@ -19,7 +19,9 @@
 #      (tests/fixture/setup-sshd-fixture.sh).
 #   3. Runs a non-fatal pre-Gradle device probe (PropertyFetcher
 #      diagnosis) and then the instrumented tests with the fixture
-#      coordinates as instrumentation arguments.
+#      coordinates as instrumentation arguments. The Gradle run is
+#      retried (up to 3 attempts total) ONLY on the flaky
+#      PropertyFetcher / Unknown-API-Level signature — see below.
 #   4. If Gradle fails, re-probes device state (post-failure probe)
 #      and exits with Gradle's original code, so the job still
 #      fails honestly.
@@ -70,14 +72,49 @@ echo "PROBE: sdk=$(timeout 60 "$ADB_BIN" -s emulator-5554 shell getprop ro.build
 # Gradle runs with errexit suspended so its exit code can be captured
 # for the post-failure probe below; a failing Gradle must NOT abort
 # the script before diagnostics run.
+#
+# --- Retry on the flaky property-fetch signature (run #30) ---
+# Run #30 proved the stall is transient and Gradle-side: the adb CLI
+# full getprop answered in 2s (331 lines, sdk=29) before Gradle, and
+# again in 3s (332 lines) after Gradle failed — yet Gradle's own
+# property fetch threw ShellCommandUnresponsiveException 3x at its
+# FIRST device contact (each ~2.5s apart, right after the
+# EmulatorConsole failure). A local bytecode read of ddmlib's
+# PropertyFetcher shows why the CLI succeeds where Gradle fails:
+# the fetch runs plain `getprop` with a 2-SECOND no-output window,
+# so any initial-output stall longer than 2s fails it even when the
+# full output would arrive just after. And the fetch is
+# intermittent, not deterministic: runs #26 and #29 got past it on
+# the same class of setup. So: retry the connected task when — and
+# ONLY when — the attempt log shows the "Unknown API Level" /
+# "PropertyFetcher" signature. A run that actually executes tests
+# (pass or fail) is never retried, so real failures still fail
+# honestly. Each retry reuses the warm daemon and up-to-date
+# tasks, so it reaches device selection in ~1-2 min.
 set +e
-./gradlew :app:connectedDebugAndroidTest --stacktrace \
-  -Pandroid.testInstrumentationRunnerArguments.fixture_host=10.0.2.2 \
-  -Pandroid.testInstrumentationRunnerArguments.fixture_port=2222 \
-  -Pandroid.testInstrumentationRunnerArguments.fixture_user=termbridge-test \
-  -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD"
-GRADLE_RC=$?
+GRADLE_RC=0
+ATTEMPT=1
+while [ "$ATTEMPT" -le 3 ]; do
+  echo "GRADLE_ATTEMPT: $ATTEMPT of 3"
+  ./gradlew :app:connectedDebugAndroidTest --stacktrace \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_host=10.0.2.2 \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_port=2222 \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_user=termbridge-test \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD" 2>&1 | tee "gradle-attempt-$ATTEMPT.log"
+  GRADLE_RC=${PIPESTATUS[0]}
+  if [ "$GRADLE_RC" -eq 0 ]; then
+    break
+  fi
+  if [ "$ATTEMPT" -lt 3 ] && grep -q -e "Unknown API Level" -e "PropertyFetcher" "gradle-attempt-$ATTEMPT.log"; then
+    echo "GRADLE_ATTEMPT: $ATTEMPT failed on the flaky property-fetch signature; retrying in 30s"
+    sleep 30
+    ATTEMPT=$((ATTEMPT + 1))
+    continue
+  fi
+  break
+done
 set -e
+# --- End retry ---
 
 # --- Post-failure probe (PropertyFetcher investigation, run #25) ---
 # Run #25 proved the PRE-Gradle probe answers (full getprop rc=0, 4s,
