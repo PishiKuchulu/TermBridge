@@ -57,7 +57,7 @@ jobs:
   # carry an exported FIXTURE_PASSWORD from the workflow's
   # script block into the fixture step, so the password must
   # never rely on the runner preserving environment between
-  # lines. The 12 implemented SshIntegrationTest cases run
+  # lines. The 13 implemented SshIntegrationTest cases run
   # against a real OpenSSH server; the 6 remaining cases stay
   # @Ignore'd with specific reasons, and without a fixture the
   # tests skip via Assume. The fixture password is generated
@@ -100,7 +100,7 @@ jobs:
       - name: Run instrumented tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
+          api-level: 29
           target: google_apis
           arch: x86_64
           cores: 4
