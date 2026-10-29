@@ -343,7 +343,12 @@ private class CountingOutputStream(
 
     override fun write(b: ByteArray, off: Int, len: Int) {
         checkCancelled()
-        super.write(b, off, len)
+        // Write to the wrapped stream DIRECTLY. FilterOutputStream's own
+        // write(byte[], int, int) loops over write(int), which is
+        // overridden above and already counts, so calling super here
+        // counted every byte twice and made every download look like a
+        // size mismatch.
+        out.write(b, off, len)
         count += len
         onProgress(count)
     }

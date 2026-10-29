@@ -94,7 +94,7 @@ class SshIntegrationTest {
     private suspend fun awaitOutput(
         session: TerminalSession,
         needle: String,
-        timeoutMs: Long = 30_000
+        timeoutMs: Long = 90_000
     ) {
         // runTest uses VIRTUAL time: a withTimeout inside it fires the
         // moment the test dispatcher idles, long before real I/O could

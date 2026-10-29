@@ -194,7 +194,9 @@ jobs:
             tail -n 40 "$f" | grep -v "^[[:space:]]*at " >> "$OUT" || true
           done
           echo "=== sshd.log tail" >> "$OUT"
-          sudo tail -n 120 /tmp/termbridge-sshd-fixture/sshd.log >> "$OUT" 2>/dev/null || true
+          sudo tail -n 60 /tmp/termbridge-sshd-fixture/sshd.log >> "$OUT" 2>/dev/null || true
+          echo "=== sshd.log key-user lines" >> "$OUT"
+          sudo grep -E "termbridge-key|publickey|Authentication refused|locked|not allowed|userauth|Failed " /tmp/termbridge-sshd-fixture/sshd.log | tail -60 >> "$OUT" 2>/dev/null || true
           echo "=== result xml failures" >> "$OUT"
           find "$GITHUB_WORKSPACE/app/build/outputs/androidTest-results" -name 'TEST-*.xml' 2>/dev/null | while read -r x; do
             grep -h -E "<testcase|<failure|<skipped" -A3 "$x" | head -c 40000 >> "$OUT" || true

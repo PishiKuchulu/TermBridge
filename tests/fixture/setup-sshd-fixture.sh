@@ -65,8 +65,11 @@ printf '%s:%s\n' "$FIXTURE_USER" "$FIXTURE_PASSWORD" | sudo chpasswd
 if ! id "$FIXTURE_KEY_USER" >/dev/null 2>&1; then
     sudo useradd -m -s /bin/bash "$FIXTURE_KEY_USER"
 fi
-# The key user has no usable password at all.
-sudo passwd -l "$FIXTURE_KEY_USER" >/dev/null 2>&1 || true
+# The key user has no password. NOT `passwd -l`: with UsePAM no, sshd
+# refuses LOCKED accounts even for public-key login ("account is
+# locked"). A `*` password field means "no password login" while still
+# permitting key auth; the Match block below also disables passwords.
+sudo usermod -p '*' "$FIXTURE_KEY_USER"
 
 sudo mkdir -p "$FIXTURE_DIR" /run/sshd
 sudo chmod 755 "$FIXTURE_DIR"
