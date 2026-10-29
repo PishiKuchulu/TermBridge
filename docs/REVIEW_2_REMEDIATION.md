@@ -28,3 +28,25 @@ the authority, and on-device verification is still open.
 Not done: AAD binding of Keystore blobs (changes the stored format),
 F-13 timeout behaviour (needs a device run to confirm), tier-2
 integration stubs, release signing.
+
+## CI evidence after remediation (emulator, API 29, runs #40–#43)
+
+- `CryptoProviderTest` passes: the bundled Bouncy Castle serves X25519 /
+  Ed25519 lookups after `SshCryptoProvider.install()`.
+- `realHandshakeAndPasswordAuthSucceeds` passes — the first real SSH
+  connection from the emulator (run #33 failed every connection). The
+  provider fix is the strongest explanation, but no isolated before/after
+  run on identical conditions exists.
+- `publicKeyAuthSucceeds` passes against the fixture (sshd log:
+  `Accepted publickey ... ED25519`). Earlier failures were fixture
+  problems: a locked account (`passwd -l` is refused by sshd with
+  `UsePAM no`) and, before that, an RSA key (SHA-1 user-auth signatures
+  are refused by OpenSSH 8.8+).
+- Bugs the integration tests exposed that unit tests could not:
+  - `CountingOutputStream` double-counted bytes, so **every download**
+    failed its size check (pre-existing; fixed).
+  - Integration tests waited under `runTest` virtual time, so every
+    shell wait "timed out" instantly (test bug; fixed).
+- Remaining known flake: the emulator sometimes reports
+  `Unknown API Level` before any test starts; the wrapper retries only
+  in that case.

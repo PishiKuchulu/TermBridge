@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.minutes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -137,7 +138,7 @@ class SshIntegrationTest {
      * never exercised against a real server.
      */
     @Test
-    fun publicKeyAuthSucceeds() = runTest {
+    fun publicKeyAuthSucceeds() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         org.junit.Assume.assumeTrue("Key fixture not configured", SshFixture.isKeyConfigured)
         val store = InMemoryTrustStore()
@@ -155,7 +156,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun realHandshakeAndPasswordAuthSucceeds() = runTest {
+    fun realHandshakeAndPasswordAuthSucceeds() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val store = InMemoryTrustStore()
         val conn = connect(store, TestDecisionHandler(answerUnknown = true))
@@ -169,7 +170,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun wrongCredentialsFailSafely() = runTest {
+    fun wrongCredentialsFailSafely() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val store = InMemoryTrustStore()
         val wrong = "wrong-password-12345".toByteArray()
@@ -189,7 +190,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun unknownHostKeyTrustFlow() = runTest {
+    fun unknownHostKeyTrustFlow() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val endpoint = SshFixture.profile().endpoint
         val store = InMemoryTrustStore()
@@ -229,7 +230,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun disconnectAndCancelReleaseResources() = runTest {
+    fun disconnectAndCancelReleaseResources() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val store = InMemoryTrustStore()
         val conn = connect(store, TestDecisionHandler())
@@ -273,7 +274,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun interactiveShellStreamsSeveralCommands() = runTest {
+    fun interactiveShellStreamsSeveralCommands() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         try {
@@ -294,7 +295,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun sftpUploadDownloadRoundTrip() = runTest {
+    fun sftpUploadDownloadRoundTrip() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         val sftp = SftpManager(asSshj(conn))
@@ -315,7 +316,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun sftpDeleteRemovesFileAndEmptyDirectory() = runTest {
+    fun sftpDeleteRemovesFileAndEmptyDirectory() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         val sftp = SftpManager(asSshj(conn))
@@ -341,7 +342,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun sftpZeroByteUnicodeConflictAndCancellation() = runTest {
+    fun sftpZeroByteUnicodeConflictAndCancellation() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         val sftp = SftpManager(asSshj(conn))
@@ -382,7 +383,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun commandButtonExecuteOneAppearsInShell() = runTest {
+    fun commandButtonExecuteOneAppearsInShell() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         try {
@@ -408,7 +409,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun commandButtonInsertOnlyDoesNotExecute() = runTest {
+    fun commandButtonInsertOnlyDoesNotExecute() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val store = InMemoryTrustStore()
         val conn = connect(store, TestDecisionHandler())
@@ -445,7 +446,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun envVarAcceptedAndRejectedAreReported() = runTest {
+    fun envVarAcceptedAndRejectedAreReported() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         try {
@@ -477,7 +478,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun terminalStartsInConfiguredWorkingDirectory() = runTest {
+    fun terminalStartsInConfiguredWorkingDirectory() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         val conn = connect(InMemoryTrustStore(), TestDecisionHandler())
         try {
@@ -503,7 +504,7 @@ class SshIntegrationTest {
     }
 
     @Test
-    fun sftpDownloadLandsInLocalFolder() = runTest {
+    fun sftpDownloadLandsInLocalFolder() = runTest(timeout = 5.minutes) {
         SshFixture.assumeAvailable()
         // SftpManager has no working-directory concept: paths
         // are absolute only. This test proves what the code
