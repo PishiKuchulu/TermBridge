@@ -204,7 +204,8 @@ class BackupService(
             encrypted = parsed.encrypted,
             hasCredentials = parsed.hasCredentials,
             conflicts = conflicts,
-            warnings = parsed.warnings + securityWarnings(parsed.document)
+            warnings = parsed.warnings,
+            advisories = securityWarnings(parsed.document)
         )
     }
 

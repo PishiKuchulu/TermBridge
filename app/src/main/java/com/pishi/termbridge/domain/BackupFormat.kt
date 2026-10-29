@@ -153,7 +153,11 @@ data class ImportPreview(
     val encrypted: Boolean,
     val hasCredentials: Boolean,
     val conflicts: List<ImportConflict>,
-    val warnings: List<String>
+    val warnings: List<String>,
+    /** Review #2 F-15: security-relevant content of the file, shown in
+     *  the preview only. Kept apart from [warnings], which the import
+     *  result inherits as "problems that occurred". */
+    val advisories: List<String> = emptyList()
 ) {
     val hostCount: Int get() = document.hosts.size
     val buttonCount: Int get() = document.hosts.sumOf { it.buttons.size }

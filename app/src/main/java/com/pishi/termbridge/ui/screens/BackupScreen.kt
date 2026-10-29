@@ -245,10 +245,10 @@ fun BackupScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            if (preview.warnings.isNotEmpty()) {
+            if (preview.warnings.isNotEmpty() || preview.advisories.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(Spacing.medium))
                 Text(text = stringResource(R.string.backup_preview_warnings))
-                for (warning in preview.warnings) {
+                for (warning in preview.warnings + preview.advisories) {
                     Text(text = warning)
                 }
             }
