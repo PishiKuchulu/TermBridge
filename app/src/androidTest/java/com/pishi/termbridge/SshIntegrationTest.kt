@@ -120,6 +120,29 @@ class SshIntegrationTest {
 
     // ---------- Tier 1: implemented ----------
 
+    /**
+     * Review #2 F-12: the fixture used to be password-only, so the
+     * private-key path (including the review #1 loadKeys fix) was
+     * never exercised against a real server.
+     */
+    @Test
+    fun publicKeyAuthSucceeds() = runTest {
+        SshFixture.assumeAvailable()
+        org.junit.Assume.assumeTrue("Key fixture not configured", SshFixture.isKeyConfigured)
+        val store = InMemoryTrustStore()
+        val conn = connect(
+            store,
+            TestDecisionHandler(answerUnknown = true),
+            profile = SshFixture.keyProfile(),
+            credential = SshFixture.keyCredential()
+        )
+        try {
+            assertTrue(conn.isConnected)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     @Test
     fun realHandshakeAndPasswordAuthSucceeds() = runTest {
         SshFixture.assumeAvailable()
@@ -144,9 +167,10 @@ class SshIntegrationTest {
             fail("Wrong credentials must not connect")
         } catch (e: SshTransportException) {
             assertEquals(SshError.AuthFailed, e.error)
-            // Fixed error strings never echo input — and the
-            // wrong password itself must not appear either.
-            assertFalse(e.error.userMessage.contains("wrong-password-12345"))
+            // The full user-facing text (fixed message plus the
+            // class/enum-name diagnostic) must not echo the input.
+            assertFalse(e.userFacingMessage().contains("wrong-password-12345"))
+            assertFalse(e.stackTraceToString().contains("wrong-password-12345"))
         } finally {
             wrong.wipe()
         }

@@ -20,10 +20,13 @@ import net.schmizz.sshj.connection.channel.direct.Session
  * A live shell channel over an established SSH connection.
  *
  * - PTY is allocated as "xterm-256color" at the size given at
- *   start; [resize] updates only the local parser grid, because
- *   sshj 0.40.0 exposes no window-change API (its Session has
- *   no setWindowSize method), so the server-side PTY size stays
- *   at the size negotiated at shell start.
+ *   start. [resize] updates the local parser grid AND sends an SSH
+ *   window-change request through the `Session.Shell` handle that
+ *   `startShell()` returns (`changeWindowDimensions`), so full-screen
+ *   programs (vim, less, htop) follow rotation and layout changes.
+ *   An earlier comment claimed sshj had no window-change API; it
+ *   does, on the Shell object, and the return value was discarded
+ *   (review #2 F-10).
  * - Output is read as UTF-8 characters (InputStreamReader, so a
  *   multi-byte character split across reads is decoded correctly),
  *   fed to the VT parser, and published as snapshots.
@@ -43,12 +46,19 @@ class TerminalSession(
 ) {
     private val parser = VtParser(initialCols, initialRows)
 
-    private val _snapshot = MutableStateFlow(parser.snapshot())
+    /** Review #2 F-10: the parser is mutated by the reader thread
+     *  (feed) and by the UI (resize) and read for snapshots; it is
+     *  not thread-safe, so every access goes through this lock. */
+    private val parserLock = Any()
+
+    private val _snapshot = MutableStateFlow(synchronized(parserLock) { parser.snapshot() })
     val snapshot: StateFlow<TerminalSnapshot> = _snapshot.asStateFlow()
 
-    private var session: Session? = null
-    private var readerJob: Job? = null
-    private var closed = false
+    // These are touched from the reader, writer and UI threads.
+    @Volatile private var session: Session? = null
+    @Volatile private var shell: Session.Shell? = null
+    @Volatile private var readerJob: Job? = null
+    @Volatile private var closed = false
 
     /**
      * Review #1 (C-02): all shell writes go through this channel,
@@ -61,8 +71,8 @@ class TerminalSession(
      * channel is recreated on every [start] so a previous [close]
      * cannot leave stale bytes for a later shell.
      */
-    private var writeChannel = Channel<ByteArray>(Channel.UNLIMITED)
-    private var writerJob: Job? = null
+    @Volatile private var writeChannel = Channel<ByteArray>(Channel.UNLIMITED)
+    @Volatile private var writerJob: Job? = null
 
     /** Called once when the shell ends (EOF or error). Null
      *  argument = clean EOF (server closed the shell). */
@@ -93,6 +103,11 @@ class TerminalSession(
         onEnvResult: ((EnvApplyResult) -> Unit)? = null
     ) {
         withContext(Dispatchers.IO) {
+            // Review #2 F-10: publish the (new) channel BEFORE the
+            // session, so a key sent while the shell is starting is
+            // queued for the writer instead of landing in a channel
+            // that is replaced a moment later and dropped.
+            writeChannel = Channel(Channel.UNLIMITED)
             val sess = connection.sshClient.startSession()
             session = sess
             sess.allocatePTY(
@@ -113,13 +128,13 @@ class TerminalSession(
                     rejected += name
                 }
             }
-            sess.startShell()
+            shell = sess.startShell()
             onEnvResult?.invoke(
                 EnvApplyResult(appliedNames = applied, rejectedNames = rejected)
             )
-            writeChannel = Channel(Channel.UNLIMITED)
+            val channel = writeChannel
             writerJob = CoroutineScope(Dispatchers.IO).launch {
-                for (bytes in writeChannel) {
+                for (bytes in channel) {
                     try {
                         sess.outputStream.write(bytes)
                         sess.outputStream.flush()
@@ -139,8 +154,11 @@ class TerminalSession(
                     while (true) {
                         val read = reader.read(buffer)
                         if (read < 0) break
-                        parser.feed(String(buffer, 0, read))
-                        _snapshot.value = parser.snapshot()
+                        val next = synchronized(parserLock) {
+                            parser.feed(String(buffer, 0, read))
+                            parser.snapshot()
+                        }
+                        _snapshot.value = next
                     }
                     notifyClosed(null)
                 } catch (e: Exception) {
@@ -153,8 +171,11 @@ class TerminalSession(
     private var closeNotified = false
 
     private fun notifyClosed(error: Throwable?) {
-        if (closeNotified) return
-        closeNotified = true
+        // Reader and writer can both report; deliver exactly once.
+        synchronized(this) {
+            if (closeNotified) return
+            closeNotified = true
+        }
         onClosed?.invoke(error)
     }
 
@@ -186,11 +207,21 @@ class TerminalSession(
     fun sendArrowLeft() = sendText("\u001B[D")
 
     fun resize(cols: Int, rows: Int) {
-        // No window-change call: sshj 0.40.0 has no setWindowSize
-        // API, so the server-side PTY size stays at its start
-        // size. The local grid still follows the measured area.
-        parser.resize(cols, rows)
-        _snapshot.value = parser.snapshot()
+        val next = synchronized(parserLock) {
+            parser.resize(cols, rows)
+            parser.snapshot()
+        }
+        _snapshot.value = next
+        // Tell the server too (SSH window-change). It is network I/O,
+        // so it never runs on the calling (UI) thread; failures are
+        // non-fatal — the local grid has already changed.
+        val sh = shell ?: return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                sh.changeWindowDimensions(cols, rows, 0, 0)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     /**
@@ -212,5 +243,6 @@ class TerminalSession(
             // Close is best-effort.
         }
         session = null
+        shell = null
     }
 }

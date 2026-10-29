@@ -14,8 +14,8 @@ data class RemoteEntry(
     val name: String,
     val path: String,
     val isDirectory: Boolean,
-    val size: Long,
     /** Remote size in bytes at listing time; -1 when unknown. */
+    val size: Long,
     val isRegularFile: Boolean
 )
 
@@ -52,8 +52,12 @@ class SftpException(val error: SftpError, cause: Throwable? = null) :
  * - All paths pass through RemotePath before they reach sshj.
  */
 class SftpManager(private val connection: SshjConnection) {
-    private var sftp: SFTPClient? = null
+    @Volatile private var sftp: SFTPClient? = null
 
+    /** Listing and transfers run concurrently on IO threads; without
+     *  this lock two callers could each open an SFTP channel and one
+     *  would never be closed (review #2 F-21). */
+    @Synchronized
     fun ensureSftp(): SFTPClient {
         val existing = sftp
         if (existing != null) return existing
@@ -167,34 +171,91 @@ class SftpManager(private val connection: SshjConnection) {
         }
     }
 
+    /**
+     * Upload through a temporary file in the SAME directory, then
+     * rename onto the target (review #2 F-11). The old code opened the
+     * target with TRUNC and streamed in place, so a failed or
+     * cancelled "overwrite" destroyed the previous file and left a
+     * partial one. Now the target is untouched until the new content
+     * has been written completely and its size verified.
+     *
+     * [overwrite] = false: an existing target is never replaced (the
+     * upload fails with AlreadyExists). [overwrite] = true: the old
+     * file is removed only AFTER the complete temporary file exists,
+     * immediately before the rename. SFTP v3 rename cannot replace
+     * atomically, so there is a short window where neither name
+     * exists; if the rename then fails, the complete upload is kept
+     * under its temporary name rather than deleted.
+     */
     fun upload(
         input: InputStream,
         remotePath: String,
         onProgress: (Long) -> Unit,
-        isCancelled: () -> Boolean
+        isCancelled: () -> Boolean,
+        overwrite: Boolean = false
     ): Long {
         val normalized = RemotePath.normalize(remotePath) ?: throw SftpException(SftpError.NotFound)
+        val parent = RemotePath.parent(normalized)
+        val targetName = normalized.substringAfterLast('/')
+        val tempPath = RemotePath.join(
+            parent,
+            ".$targetName.tbpart-" + java.util.UUID.randomUUID().toString().take(8)
+        ) ?: throw SftpException(SftpError.Generic)
         val counting = CountingInputStream(input, onProgress, isCancelled)
+        var tempWritten = false
         try {
             // sshj 0.40.0 has no put(InputStream, String):
             // stream through the remote file's own output stream.
             val remote = ensureSftp().open(
-                normalized,
-                setOf(OpenMode.WRITE, OpenMode.CREAT, OpenMode.TRUNC)
+                tempPath,
+                setOf(OpenMode.WRITE, OpenMode.CREAT, OpenMode.EXCL)
             )
+            tempWritten = true
             try {
                 counting.copyTo(remote.RemoteFileOutputStream())
             } finally {
                 remote.close()
             }
+            val tempSize = statSize(tempPath)
+            if (tempSize != null && tempSize != counting.count) {
+                throw SftpException(SftpError.IntegrityMismatch)
+            }
+            if (overwrite) {
+                try {
+                    ensureSftp().rm(normalized)
+                } catch (_: Exception) {
+                    // Not there (the usual case) or not removable; the
+                    // rename below reports the real problem, if any.
+                }
+            } else if (statSize(normalized) != null) {
+                throw SftpException(SftpError.AlreadyExists)
+            }
+            try {
+                ensureSftp().rename(tempPath, normalized)
+            } catch (e: Exception) {
+                // Complete upload stays under its temporary name.
+                tempWritten = false
+                throw SftpException(
+                    if (statSize(normalized) != null) SftpError.AlreadyExists else mapError(e),
+                    e
+                )
+            }
+            tempWritten = false
         } catch (e: TransferCancelledException) {
             throw SftpException(SftpError.Cancelled, e)
+        } catch (e: SftpException) {
+            throw e
         } catch (e: Exception) {
             throw SftpException(mapError(e), e)
-        }
-        val remoteSize = statSize(normalized)
-        if (remoteSize != null && remoteSize != counting.count) {
-            throw SftpException(SftpError.IntegrityMismatch)
+        } finally {
+            if (tempWritten) {
+                // Failed or cancelled before completion: never leave a
+                // partial temporary file behind (best-effort).
+                try {
+                    ensureSftp().rm(tempPath)
+                } catch (_: Exception) {
+                }
+            }
         }
         return counting.count
     }
@@ -225,6 +286,18 @@ class SftpManager(private val connection: SshjConnection) {
     }
 
     private fun mapError(e: Exception): SftpError {
+        // Prefer sshj's typed status code; server-supplied message
+        // text (which can contain file names such as "permission.txt")
+        // is only a fallback (review #2 F-21).
+        if (e is net.schmizz.sshj.sftp.SFTPException) {
+            when (e.statusCode) {
+                net.schmizz.sshj.sftp.Response.StatusCode.PERMISSION_DENIED -> return SftpError.PermissionDenied
+                net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_FILE,
+                net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_PATH -> return SftpError.NotFound
+                net.schmizz.sshj.sftp.Response.StatusCode.FILE_ALREADY_EXISTS -> return SftpError.AlreadyExists
+                else -> Unit
+            }
+        }
         val message = e.message ?: ""
         return when {
             "permission" in message.lowercase() -> SftpError.PermissionDenied

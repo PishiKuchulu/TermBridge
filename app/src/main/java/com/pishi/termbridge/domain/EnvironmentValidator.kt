@@ -70,10 +70,7 @@ object EnvironmentValidator {
      */
     fun validateRemoteDirectory(directory: String, shell: RemoteShell): ValidationIssue? {
         if (directory.isBlank()) return null
-        val normalised = when (shell) {
-            RemoteShell.POSIX -> RemotePath.normalize(directory)
-            RemoteShell.POWERSHELL, RemoteShell.CMD -> WindowsPath.normalize(directory)
-        }
+        val normalised = canonicalDirectory(directory, shell)
         return if (normalised == null) {
             ValidationIssue(
                 "remoteWorkingDirectory",
@@ -93,6 +90,13 @@ object EnvironmentValidator {
     /** Canonical form of a directory for storage, or null if invalid. */
     fun canonicalDirectory(directory: String, shell: RemoteShell): String? {
         if (directory.isBlank()) return ""
+        // Review #2 F-03 / F-22: this text is TYPED into the shell on
+        // every connect, so control characters are refused here (the
+        // POSIX normaliser is shared with SFTP and must stay
+        // permissive about odd remote file names), and `%` is refused
+        // for cmd.exe, which expands %VAR% even inside double quotes.
+        if (ControlChars.containsControl(directory)) return null
+        if (shell == RemoteShell.CMD && '%' in directory) return null
         return when (shell) {
             RemoteShell.POSIX -> RemotePath.normalize(directory)
             RemoteShell.POWERSHELL, RemoteShell.CMD -> WindowsPath.normalize(directory)

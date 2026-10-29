@@ -248,7 +248,7 @@ What changed since the handoff above:
 - Exception-message scrubbing (phase 2): import warnings
   withhold messages matching obvious-secret patterns.
 - SSH fixture (phase 3): `tests/fixture/setup-sshd-fixture.sh`
-  + 12 implemented instrumented integration tests; 6
+  + 13 implemented instrumented integration tests; 6
   remain @Ignore'd with specific reasons.
 - Dependency spot audit (phase 5): OSV queries over direct
   deps (clean) + 4 Bouncy Castle advisories on the sshj

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -238,7 +239,7 @@ class FilesViewModel(
             } catch (e: SshTransportException) {
                 _uiState.value = _uiState.value.copy(
                     status = FilesStatus.FAILED,
-                    errorMessage = e.error.userMessage
+                    errorMessage = e.userFacingMessage()
                 )
             } catch (e: SftpException) {
                 disconnect()
@@ -412,7 +413,10 @@ class FilesViewModel(
             // the actual upload starts from resolveUploadConflict().
             _uiState.value = _uiState.value.copy(uploadConflictName = safeName)
         } else {
-            startUpload(uri, safeName)
+            // Not in the (possibly stale) listing: never overwrite. If
+            // the name appeared meanwhile the upload fails with
+            // AlreadyExists instead of truncating (review #2 F-11).
+            startUpload(uri, safeName, overwrite = false)
         }
     }
 
@@ -424,7 +428,7 @@ class FilesViewModel(
         _uiState.value = _uiState.value.copy(uploadConflictName = null)
         if (!overwrite && !rename) return
         if (overwrite) {
-            startUpload(uri, baseName)
+            startUpload(uri, baseName, overwrite = true)
         } else {
             val existing = _uiState.value.entries.map { it.name }.toSet()
             var candidate = baseName
@@ -438,15 +442,19 @@ class FilesViewModel(
                 }
                 counter++
             }
-            startUpload(uri, candidate)
+            startUpload(uri, candidate, overwrite = false)
         }
     }
 
-    private fun startUpload(uri: Uri, remoteName: String) {
+    private fun startUpload(uri: Uri, remoteName: String, overwrite: Boolean) {
         pendingUploadUri = null
         pendingUploadName = null
         val manager = sftpManager ?: return
-        val remotePath = RemotePath.join(_uiState.value.currentPath, remoteName) ?: return
+        val remotePath = RemotePath.join(_uiState.value.currentPath, remoteName)
+        if (remotePath == null) {
+            _uiState.update { it.copy(errorMessage = "That file name cannot be used on the server.") }
+            return
+        }
         transferCancelled = false
         transferJob = viewModelScope.launch {
             try {
@@ -463,11 +471,12 @@ class FilesViewModel(
                             stream,
                             remotePath,
                             onProgress = { bytes ->
-                                _uiState.value = _uiState.value.copy(
-                                    transfer = TransferProgress(remoteName, bytes, total, "Upload")
-                                )
+                                _uiState.update {
+                                    it.copy(transfer = TransferProgress(remoteName, bytes, total, "Upload"))
+                                }
                             },
-                            isCancelled = { transferCancelled }
+                            isCancelled = { transferCancelled },
+                            overwrite = overwrite
                         )
                     }
                 }
@@ -511,6 +520,12 @@ class FilesViewModel(
      */
     fun downloadToLocalFolder(entry: RemoteEntry) {
         val hostId = _uiState.value.connectedHost?.id ?: return
+        // The name comes from the server: refuse anything that is not a
+        // plain file name before it becomes a local document name.
+        if (!RemotePath.isValidName(entry.name) || com.pishi.termbridge.domain.ControlChars.containsControl(entry.name)) {
+            _uiState.update { it.copy(errorMessage = "This file name cannot be saved locally.") }
+            return
+        }
         viewModelScope.launch {
             val settings = environmentRepository.getSettingsOnce(hostId)
             val treeUriString = settings?.localDirectoryUri?.takeIf { it.isNotBlank() }
@@ -570,9 +585,9 @@ class FilesViewModel(
                             stream,
                             expectedSize = if (entry.size >= 0) entry.size else null,
                             onProgress = { bytes ->
-                                _uiState.value = _uiState.value.copy(
-                                    transfer = TransferProgress(entry.name, bytes, entry.size, "Download")
-                                )
+                                _uiState.update {
+                                    it.copy(transfer = TransferProgress(entry.name, bytes, entry.size, "Download"))
+                                }
                             },
                             isCancelled = { transferCancelled }
                         )

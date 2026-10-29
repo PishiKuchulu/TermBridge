@@ -15,6 +15,7 @@ import com.pishi.termbridge.data.MIGRATION_4_5
 import com.pishi.termbridge.data.TermBridgeDatabase
 import com.pishi.termbridge.data.TransactionRunner
 import com.pishi.termbridge.security.AndroidKeystoreSecretCrypto
+import com.pishi.termbridge.security.SshCryptoProvider
 
 /**
  * Manual dependency container (prompt 02 decision: no DI framework
@@ -24,6 +25,24 @@ import com.pishi.termbridge.security.AndroidKeystoreSecretCrypto
  * encrypts on save and decrypts only on a connection attempt.
  */
 class TermBridgeApplication : Application() {
+    /**
+     * Review #2 F-01: sshj resolves its crypto by the provider NAME
+     * "BC". Android ships its own, older "BC" provider, so without
+     * this the bundled Bouncy Castle is never reachable and key
+     * exchange / Ed25519 host-key decoding can fail before
+     * authentication. Install the bundled provider before the first
+     * SSHClient is ever constructed.
+     */
+    override fun onCreate() {
+        super.onCreate()
+        SshCryptoProvider.install()
+    }
+
+    /** One shared instance: the Keystore key-creation lock is
+     *  process-wide, but a single instance keeps the intent obvious
+     *  (review #2 F-04). */
+    private val secretCrypto: AndroidKeystoreSecretCrypto by lazy { AndroidKeystoreSecretCrypto() }
+
     val database: TermBridgeDatabase by lazy {
         Room.databaseBuilder(
             applicationContext,
@@ -62,7 +81,7 @@ class TermBridgeApplication : Application() {
         HostRepository(
             hostDao = database.hostDao(),
             trustedHostKeyDao = database.trustedHostKeyDao(),
-            secretCrypto = AndroidKeystoreSecretCrypto(),
+            secretCrypto = secretCrypto,
             commandButtonDao = database.commandButtonDao(),
             hostSettingsDao = database.hostSettingsDao(),
             hostEnvVarDao = database.hostEnvVarDao(),
@@ -79,7 +98,7 @@ class TermBridgeApplication : Application() {
         HostEnvironmentRepository(
             settingsDao = database.hostSettingsDao(),
             envVarDao = database.hostEnvVarDao(),
-            secretCrypto = AndroidKeystoreSecretCrypto()
+            secretCrypto = secretCrypto
         )
     }
 

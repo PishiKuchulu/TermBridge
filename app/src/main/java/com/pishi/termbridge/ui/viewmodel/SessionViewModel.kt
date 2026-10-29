@@ -10,10 +10,12 @@ import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CdCommand
 import com.pishi.termbridge.domain.CommandButton
 import com.pishi.termbridge.domain.EnvVarValue
+import com.pishi.termbridge.domain.EnvironmentValidator
 import com.pishi.termbridge.domain.CommandRunner
 import com.pishi.termbridge.domain.CommandTemplate
 import com.pishi.termbridge.domain.HostProfile
 import com.pishi.termbridge.domain.PreparedCommand
+import com.pishi.termbridge.domain.RiskyCommand
 import com.pishi.termbridge.domain.SequenceProgress
 import com.pishi.termbridge.domain.TerminalSender
 import com.pishi.termbridge.domain.wipe
@@ -41,6 +43,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class SessionStatus {
@@ -196,14 +199,14 @@ class SessionViewModel(
     private suspend fun awaitDecision(pending: PendingTrust): Boolean {
         val deferred = CompletableDeferred<Boolean>()
         decisionDeferred = deferred
-        _uiState.value = _uiState.value.copy(pendingTrust = pending)
+        // Atomic update: this runs on the sshj transport thread while
+        // the main thread also writes uiState (review #2 F-24).
+        _uiState.update { it.copy(pendingTrust = pending) }
         try {
             return deferred.await()
         } finally {
             decisionDeferred = null
-            if (_uiState.value.pendingTrust == pending) {
-                _uiState.value = _uiState.value.copy(pendingTrust = null)
-            }
+            _uiState.update { if (it.pendingTrust == pending) it.copy(pendingTrust = null) else it }
         }
     }
 
@@ -225,6 +228,9 @@ class SessionViewModel(
             ?: _uiState.value.connectedHost?.id
             ?: return
         connectJob?.cancel()
+        // Review #2 F-05: a reconnect (or a retry after a failure)
+        // must not orphan the previous authenticated transport.
+        closeLiveSession()
         _uiState.value = _uiState.value.copy(
             status = SessionStatus.CONNECTING,
             errorMessage = null,
@@ -281,15 +287,20 @@ class SessionViewModel(
                 }
                 val terminal = TerminalSession(sshjConn, 80, 24)
                 terminal.onClosed = { error ->
-                    if (_uiState.value.status == SessionStatus.CONNECTED) {
-                        _uiState.value = _uiState.value.copy(
-                            status = SessionStatus.FAILED,
-                            errorMessage = if (error == null) {
-                                "Shell closed by the server."
-                            } else {
-                                "Connection lost."
-                            }
-                        )
+                    // Runs on the terminal's IO threads: atomic update.
+                    _uiState.update {
+                        if (it.status == SessionStatus.CONNECTED) {
+                            it.copy(
+                                status = SessionStatus.FAILED,
+                                errorMessage = if (error == null) {
+                                    "Shell closed by the server."
+                                } else {
+                                    "Connection lost."
+                                }
+                            )
+                        } else {
+                            it
+                        }
                     }
                 }
                 terminalSession = terminal
@@ -326,11 +337,22 @@ class SessionViewModel(
                 }
                 val workingDir = settings?.remoteWorkingDirectory?.takeIf { it.isNotBlank() }
                 if (workingDir != null && settings != null) {
-                    terminal.sendText(CdCommand.render(workingDir, settings.remoteShell))
-                    terminal.sendEnter()
-                    _envStatus.value = (_envStatus.value ?: EnvStatus()).copy(
-                        workingDirectory = workingDir
-                    )
+                    // Re-validate at the point of use (review #2 F-03):
+                    // a value stored before the control-character rule
+                    // existed must not be typed into the shell.
+                    val safeCd = try {
+                        EnvironmentValidator.canonicalDirectory(workingDir, settings.remoteShell)
+                            ?.let { CdCommand.render(it, settings.remoteShell) }
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                    if (safeCd != null) {
+                        terminal.sendText(safeCd)
+                        terminal.sendEnter()
+                        _envStatus.value = (_envStatus.value ?: EnvStatus()).copy(
+                            workingDirectory = workingDir
+                        )
+                    }
                 }
                 _uiState.value = _uiState.value.copy(
                     status = SessionStatus.CONNECTED,
@@ -349,22 +371,59 @@ class SessionViewModel(
                         _commandButtons.value = it
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // A superseded or cancelled attempt must not write
+                // FAILED over the state of the attempt that replaced
+                // it; whoever cancelled owns the state.
+                throw e
             } catch (e: SshTransportException) {
-                _uiState.value = _uiState.value.copy(
-                    status = SessionStatus.FAILED,
-                    errorMessage = e.error.userMessage
-                )
+                closeLiveSession()
+                _uiState.update {
+                    it.copy(
+                        status = SessionStatus.FAILED,
+                        errorMessage = e.userFacingMessage()
+                    )
+                }
             } catch (e: Exception) {
                 // Generic only — repository/transport messages are
                 // already secret-free, but this is the second net.
-                _uiState.value = _uiState.value.copy(
-                    status = SessionStatus.FAILED,
-                    errorMessage = "Connection failed. Please try again."
-                )
+                // Review #2 F-05: a failure AFTER authentication
+                // (e.g. the shell could not start) must close the
+                // already-authenticated transport.
+                closeLiveSession()
+                _uiState.update {
+                    it.copy(
+                        status = SessionStatus.FAILED,
+                        errorMessage = "Connection failed. Please try again."
+                    )
+                }
             } finally {
                 credentialBytes?.wipe()
                 passphraseChars?.wipe()
                 envValues.forEach { it.value.wipe() }
+            }
+        }
+    }
+
+    /**
+     * Close the current terminal channel and transport WITHOUT
+     * touching UI state (review #2 F-05). Closing sends protocol
+     * messages over the socket, so it runs on IO.
+     */
+    private fun closeLiveSession() {
+        val sessionToClose = terminalSession
+        val connectionToClose = connection
+        terminalSession = null
+        connection = null
+        if (sessionToClose == null && connectionToClose == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                sessionToClose?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                connectionToClose?.disconnect()
+            } catch (_: Exception) {
             }
         }
     }
@@ -471,7 +530,17 @@ class SessionViewModel(
             _blockedMessage.value = block
             return
         }
-        if (prepared.isRisky && !confirmedRisky) {
+        // Review #2 F-14: do not trust the caller-supplied flag
+        // alone — re-derive the classification from the text that
+        // is about to be typed, so a hand-built PreparedCommand with
+        // isRisky = false cannot skip the confirmation.
+        val reclassified = when (prepared.button.mode) {
+            com.pishi.termbridge.domain.CommandMode.SEQUENCE ->
+                RiskyCommand.classifySteps(prepared.renderedSteps, prepared.shell)
+            else -> RiskyCommand.classify(prepared.rendered, prepared.shell)
+        }
+        val treatAsRisky = prepared.isRisky || reclassified.isRisky
+        if (treatAsRisky && !confirmedRisky) {
             _pendingRisky.value = prepared
             return
         }

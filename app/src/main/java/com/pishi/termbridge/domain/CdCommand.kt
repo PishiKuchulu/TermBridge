@@ -38,6 +38,15 @@ object CdCommand {
     fun render(directory: String, shell: RemoteShell): String = when (shell) {
         RemoteShell.POSIX, RemoteShell.POWERSHELL ->
             "cd " + CommandTemplate.shellQuote(directory, shell)
-        RemoteShell.CMD -> "cd /d \"$directory\""
+        RemoteShell.CMD -> {
+            // Review #2 F-22: cmd.exe expands %VAR% even inside
+            // double quotes, and `"` / control characters would break
+            // out of the quoting. Refuse instead of guessing.
+            require(
+                '%' !in directory && '"' !in directory &&
+                    !ControlChars.containsControl(directory)
+            ) { "This directory cannot be quoted safely for cmd.exe." }
+            "cd /d \"$directory\""
+        }
     }
 }

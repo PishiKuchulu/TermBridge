@@ -37,6 +37,41 @@ cd "$REPO_ROOT"
 FIXTURE_PASSWORD="$(openssl rand -base64 24)"
 export FIXTURE_PASSWORD
 bash tests/fixture/setup-sshd-fixture.sh
+# Public-key user's private key, as one base64 line (instrumentation
+# arguments cannot carry newlines). Per-run, never committed.
+FIXTURE_KEY_B64="$(sudo base64 -w0 /tmp/termbridge-sshd-fixture/client_key)"
+
+# Review #2 F-17: the per-run secrets travel as instrumentation
+# arguments, and AGP/UTP records those arguments in its result files.
+# Scrub both values from every result/report file on exit so the
+# uploaded artifact never contains them.
+scrub_secrets() {
+  for d in app/build/outputs/androidTest-results app/build/reports; do
+    [ -d "$d" ] || continue
+    FIXTURE_PASSWORD="$FIXTURE_PASSWORD" FIXTURE_KEY_B64="$FIXTURE_KEY_B64" python3 - "$d" <<'PYEOF' || true
+import os, sys
+secrets = [v for v in (os.environ.get("FIXTURE_PASSWORD", ""), os.environ.get("FIXTURE_KEY_B64", "")) if v]
+for root, _, files in os.walk(sys.argv[1]):
+    for name in files:
+        path = os.path.join(root, name)
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            changed = False
+            for secret in secrets:
+                raw = secret.encode()
+                if raw in data:
+                    data = data.replace(raw, b"***REDACTED***")
+                    changed = True
+            if changed:
+                with open(path, "wb") as f:
+                    f.write(data)
+        except OSError:
+            pass
+PYEOF
+  done
+  rm -f gradle-attempt-*.log.tmp
+}
 
 # --- Diagnostic probe (PropertyFetcher investigation, run #24) ---
 # Purpose: distinguish an emulator/adbd-side stall from a Gradle-side
@@ -110,12 +145,19 @@ while [ "$ATTEMPT" -le 3 ]; do
     -Pandroid.testInstrumentationRunnerArguments.fixture_host=10.0.2.2 \
     -Pandroid.testInstrumentationRunnerArguments.fixture_port=2222 \
     -Pandroid.testInstrumentationRunnerArguments.fixture_user=termbridge-test \
-    -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD" 2>&1 | tee "gradle-attempt-$ATTEMPT.log"
+    -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD" \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_key_user=termbridge-key \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_key_b64="$FIXTURE_KEY_B64" 2>&1 | tee "gradle-attempt-$ATTEMPT.log"
   GRADLE_RC=${PIPESTATUS[0]}
   if [ "$GRADLE_RC" -eq 0 ]; then
     break
   fi
-  if [ "$ATTEMPT" -lt 3 ] && grep -q -e "Unknown API Level" -e "PropertyFetcher" -e "Cannot install split APKs" "gradle-attempt-$ATTEMPT.log"; then
+  # Review #2 F-16: retry ONLY when no test was ever started. A run
+  # that executed tests (pass or fail) must never be retried, even if
+  # its log happens to contain one of the signatures.
+  if [ "$ATTEMPT" -lt 3 ] \
+     && ! grep -q -E "Starting [0-9]+ tests? on" "gradle-attempt-$ATTEMPT.log" \
+     && grep -q -e "Unknown API Level" -e "PropertyFetcher" -e "Cannot install split APKs" "gradle-attempt-$ATTEMPT.log"; then
     echo "GRADLE_ATTEMPT: $ATTEMPT failed on a flaky first-contact signature; retrying in 30s"
     sleep 30
     ATTEMPT=$((ATTEMPT + 1))
@@ -178,4 +220,5 @@ if [ "$GRADLE_RC" -ne 0 ]; then
 fi
 # --- End post-failure probe ---
 
+scrub_secrets
 exit "$GRADLE_RC"

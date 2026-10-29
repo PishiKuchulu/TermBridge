@@ -33,25 +33,53 @@ class AndroidKeystoreSecretCrypto : SecretCrypto {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_BITS = 128
         private const val IV_BYTES = 12
+
+        /**
+         * Process-wide lock for key creation/deletion (review #2
+         * F-04). Two instances exist (host + environment
+         * repositories); without one shared lock two first-use
+         * encryptions could both see "no key", both generate under
+         * the same alias, and the later key would orphan blobs the
+         * earlier one had just written.
+         */
+        private val keyLock = Any()
+    }
+
+    /**
+     * Look the key up WITHOUT ever creating it. Decryption must
+     * never mint a replacement key (review #2 F-04): a transient or
+     * lost-key condition on a read would otherwise silently destroy
+     * every stored credential by installing a fresh key under the
+     * same alias. A missing key is a hard failure the caller
+     * surfaces as "re-enter the credential".
+     */
+    private fun getExistingKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        return keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+            ?: throw java.security.UnrecoverableKeyException(
+                "The stored-credential key is not available."
+            )
     }
 
     private fun getOrCreateKey(): SecretKey {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-        if (existing != null) return existing
-        val spec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .setRandomizedEncryptionRequired(true)
-            .setUserAuthenticationRequired(false)
-            .build()
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(spec)
-        }.generateKey()
+        synchronized(keyLock) {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+            if (existing != null) return existing
+            val spec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setRandomizedEncryptionRequired(true)
+                .setUserAuthenticationRequired(false)
+                .build()
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            generator.init(spec)
+            return generator.generateKey()
+        }
     }
 
     override fun encrypt(plaintext: ByteArray): ByteArray {
@@ -73,15 +101,17 @@ class AndroidKeystoreSecretCrypto : SecretCrypto {
         val iv = blob.copyOfRange(0, IV_BYTES)
         val ciphertext = blob.copyOfRange(IV_BYTES, blob.size)
         val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+            init(Cipher.DECRYPT_MODE, getExistingKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
         }
         return cipher.doFinal(ciphertext)
     }
 
     override fun deleteKey() {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias(KEY_ALIAS)) {
-            keyStore.deleteEntry(KEY_ALIAS)
+        synchronized(keyLock) {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (keyStore.containsAlias(KEY_ALIAS)) {
+                keyStore.deleteEntry(KEY_ALIAS)
+            }
         }
     }
 }

@@ -24,6 +24,7 @@ import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.CommandButton
 import com.pishi.termbridge.domain.CommandMode
 import com.pishi.termbridge.domain.CommandTemplate
+import com.pishi.termbridge.domain.ControlChars
 import com.pishi.termbridge.domain.PreparedCommand
 import com.pishi.termbridge.ui.theme.Spacing
 
@@ -152,14 +153,14 @@ fun ParameterDialog(
                     if (button.mode == CommandMode.SEQUENCE) {
                         prepared.renderedSteps.forEachIndexed { index, step ->
                             Text(
-                                text = "${index + 1}. $step",
+                                text = "${index + 1}. ${ControlChars.visualize(step)}",
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                     } else {
                         Text(
-                            text = prepared.rendered,
+                            text = ControlChars.visualize(prepared.rendered),
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -224,14 +225,14 @@ fun RiskyConfirmDialog(
                 if (prepared.button.mode == CommandMode.SEQUENCE) {
                     prepared.renderedSteps.forEachIndexed { index, step ->
                         Text(
-                            text = "${index + 1}. $step",
+                            text = "${index + 1}. ${ControlChars.visualize(step)}",
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
                 } else {
                     Text(
-                        text = prepared.rendered,
+                        text = ControlChars.visualize(prepared.rendered),
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodyMedium
                     )

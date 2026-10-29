@@ -14,6 +14,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # contents: write is needed only to refresh the rolling
+    # "debug-latest" pre-release below (GITHUB_TOKEN, no other secret).
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,8 +39,37 @@ jobs:
 
       - name: Set up Gradle (uses the committed wrapper, 8.10.2)
         uses: gradle/actions/setup-gradle@v4
-      - name: Run Gradle build
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      # The APK is built first and uploaded before the unit tests run,
+      # so a red unit-test run still leaves an installable build for
+      # triage. It is a DEBUG-signed build (auto debug key), installable
+      # on a device; there is no release signing yet.
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TermBridge-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      # Replaces the previous rolling pre-release with this build.
+      # Runs only when the unit tests passed, on pushes to main.
+      - name: Publish debug APK as the latest pre-release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk TermBridge-debug.apk
+          gh release delete debug-latest --cleanup-tag --yes || true
+          gh release create debug-latest TermBridge-debug.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "TermBridge debug build" \
+            --notes "Debug-signed APK built by CI from commit $GITHUB_SHA. Not a release build."
 
       # Prompt 15: machine-readable test output even on failure,
       # so a red run still yields its XML reports for triage.

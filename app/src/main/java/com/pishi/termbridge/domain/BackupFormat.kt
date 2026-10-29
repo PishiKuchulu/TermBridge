@@ -36,7 +36,12 @@ const val MAX_TUNNELS_PER_HOST = 100
 /** Minimum passphrase for an encrypted backup, enforced in the UI
  *  and again in the codec (a short passphrase must fail even if
  *  the UI is bypassed). */
-const val MIN_EXPORT_PASSPHRASE_LENGTH = 8
+const val MIN_EXPORT_PASSPHRASE_LENGTH = 12
+
+/** Import accepts the older, shorter minimum so a backup exported
+ *  before the export minimum was raised (review #2 F-19) can still be
+ *  opened; only NEW exports are held to the higher bar. */
+const val MIN_IMPORT_PASSPHRASE_LENGTH = 8
 
 /** A credential carried inside an ENCRYPTED payload only. [value]
  *  is the password text, or the PEM text for a private key. A key

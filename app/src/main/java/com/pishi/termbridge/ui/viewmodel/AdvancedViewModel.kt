@@ -393,7 +393,7 @@ class AdvancedViewModel(
                 _activeTunnels.value = emptyList()
                 throw e
             } catch (e: SshTransportException) {
-                failSession(e.error.userMessage)
+                failSession(e.userFacingMessage())
             } catch (_: Exception) {
                 failSession("Connection failed. Please try again.")
             } finally {

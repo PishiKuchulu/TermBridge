@@ -50,6 +50,22 @@ object CommandValidator {
                 )
             }
         }
+        for (template in templates) {
+            if (ControlChars.containsControlExceptNewline(template)) {
+                issues += ValidationIssue(
+                    "template",
+                    "A command must not contain control characters (other than line breaks)."
+                )
+            }
+        }
+        for (variable in button.variables) {
+            if (ControlChars.containsControl(variable.defaultValue)) {
+                issues += ValidationIssue(
+                    "variables",
+                    "A default value must not contain control characters."
+                )
+            }
+        }
         val names = button.variables.map { it.name }
         if (names.size != names.toSet().size) {
             issues += ValidationIssue("variables", "Variable names must be unique.")

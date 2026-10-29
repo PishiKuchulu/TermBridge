@@ -49,6 +49,52 @@ class RiskyAndSecretTest {
         }
     }
 
+    /** Review #2 F-09: the app single-quotes every parameter value. */
+    @Test
+    fun quotedValuesClassifyLikeUnquotedOnes() {
+        val cases = listOf(
+            "chmod -R 777 '/etc'",
+            "chmod -R 777 '/'",
+            "chmod -R 777 /",
+            "rm '/etc'",
+            "rm /",
+            "systemctl stop 'sshd'"
+        )
+        for (command in cases) {
+            assertTrue("$command should be risky", RiskyCommand.classify(command).isRisky)
+        }
+    }
+
+    @Test
+    fun backgroundOperatorSubshellsAndPathQualifiedCommandsAreSeen() {
+        val cases = listOf(
+            "ls & rm -rf /",
+            "/bin/rm -rf /",
+            "(rm -rf /)",
+            "echo hi && (rm -rf ~)",
+            "echo \$(rm -rf /)",
+            "\\rm -rf /",
+            "nohup rm -rf /"
+        )
+        for (command in cases) {
+            assertTrue("$command should be risky", RiskyCommand.classify(command).isRisky)
+        }
+    }
+
+    @Test
+    fun ordinaryCommandsStayQuiet() {
+        val cases = listOf(
+            "ls -la",
+            "chmod -R 755 ./project",
+            "cd '/var/log' && tail -n 50 syslog",
+            "grep -r 'term' ./src",
+            "echo done & echo more"
+        )
+        for (command in cases) {
+            assertFalse("$command should not be risky", RiskyCommand.classify(command).isRisky)
+        }
+    }
+
     @Test
     fun riskySegmentHidingAfterBenignSegmentIsStillRisky() {
         assertTrue(RiskyCommand.classify("ls; rm -rf /tmp/cache").isRisky)

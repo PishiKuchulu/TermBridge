@@ -25,6 +25,7 @@ import com.pishi.termbridge.domain.MAX_ENV_VARS_PER_HOST
 import com.pishi.termbridge.domain.MAX_HOSTS_IN_BACKUP
 import com.pishi.termbridge.domain.MAX_TUNNELS_PER_HOST
 import com.pishi.termbridge.domain.MIN_EXPORT_PASSPHRASE_LENGTH
+import com.pishi.termbridge.domain.MIN_IMPORT_PASSPHRASE_LENGTH
 import com.pishi.termbridge.domain.MAX_BACKUP_BYTES
 import com.pishi.termbridge.domain.ProxyKind
 import com.pishi.termbridge.domain.ProxySpecParser
@@ -196,7 +197,7 @@ object BackupCodec {
             ) {
                 throw BackupException("Unsupported backup encryption parameters.")
             }
-            if (passphrase == null || passphrase.size < MIN_EXPORT_PASSPHRASE_LENGTH) {
+            if (passphrase == null || passphrase.size < MIN_IMPORT_PASSPHRASE_LENGTH) {
                 throw BackupException("A passphrase is required to open this backup.")
             }
             val blob = try {

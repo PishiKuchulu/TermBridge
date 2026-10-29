@@ -8,15 +8,20 @@
 #   - runs a DEDICATED sshd instance on port 2222 with its own
 #     config + host keys under /tmp/termbridge-sshd-fixture
 #     (the system sshd is never touched or restarted)
-#   - accepts password auth, AcceptEnv TERM_BRIDGE_* (so the
-#     env accepted/rejected test has a real policy to hit)
+#   - accepts password auth for the main user and PUBLIC-KEY auth
+#     for a second user (so the private-key code path is exercised
+#     against a real server, review #2 F-12)
+#   - offers ed25519, RSA and ECDSA host keys, and logs at DEBUG1 so
+#     a pre-authentication failure leaves evidence in sshd.log
+#   - AcceptEnv TERM_BRIDGE_* (so the env accepted/rejected test has
+#     a real policy to hit)
 #
 # What it NEVER does:
 #   - echo, log, or store the password (it arrives only via
 #     the FIXTURE_PASSWORD environment variable)
 #   - touch a real server, a real user, or real credentials
-#   - open anything except the fixture port on loopback-reachable
-#     interfaces (the emulator reaches it as 10.0.2.2)
+#   - listen on anything but 127.0.0.1 (the emulator reaches the
+#     host's loopback as 10.0.2.2, so loopback is sufficient)
 #
 # Usage (CI):
 #   FIXTURE_PASSWORD="$(openssl rand -base64 24)" \
@@ -36,6 +41,7 @@
 set -euo pipefail
 
 FIXTURE_USER="${FIXTURE_USER:-termbridge-test}"
+FIXTURE_KEY_USER="${FIXTURE_KEY_USER:-termbridge-key}"
 FIXTURE_PORT="${FIXTURE_PORT:-2222}"
 FIXTURE_DIR="${FIXTURE_DIR:-/tmp/termbridge-sshd-fixture}"
 
@@ -56,6 +62,12 @@ fi
 # Password via stdin only — never on a command line, never echoed.
 printf '%s:%s\n' "$FIXTURE_USER" "$FIXTURE_PASSWORD" | sudo chpasswd
 
+if ! id "$FIXTURE_KEY_USER" >/dev/null 2>&1; then
+    sudo useradd -m -s /bin/bash "$FIXTURE_KEY_USER"
+fi
+# The key user has no usable password at all.
+sudo passwd -l "$FIXTURE_KEY_USER" >/dev/null 2>&1 || true
+
 sudo mkdir -p "$FIXTURE_DIR" /run/sshd
 sudo chmod 755 "$FIXTURE_DIR"
 
@@ -63,19 +75,43 @@ if [ ! -f "$FIXTURE_DIR/ssh_host_ed25519_key" ]; then
     sudo ssh-keygen -t ed25519 -f "$FIXTURE_DIR/ssh_host_ed25519_key" -N "" -q
 fi
 
+if [ ! -f "$FIXTURE_DIR/ssh_host_rsa_key" ]; then
+    sudo ssh-keygen -t rsa -b 3072 -f "$FIXTURE_DIR/ssh_host_rsa_key" -N "" -q
+fi
+if [ ! -f "$FIXTURE_DIR/ssh_host_ecdsa_key" ]; then
+    sudo ssh-keygen -t ecdsa -b 256 -f "$FIXTURE_DIR/ssh_host_ecdsa_key" -N "" -q
+fi
+
+# Client key for the public-key user: PEM-format RSA (what sshj's
+# PKCS#8/PEM loader reads), generated per run, never committed.
+sudo rm -f "$FIXTURE_DIR/client_key" "$FIXTURE_DIR/client_key.pub"
+sudo ssh-keygen -t rsa -b 2048 -m PEM -f "$FIXTURE_DIR/client_key" -N "" -q
+sudo cp "$FIXTURE_DIR/client_key.pub" "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
+sudo chmod 644 "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
+sudo chmod 644 "$FIXTURE_DIR/client_key"
+
 sudo tee "$FIXTURE_DIR/sshd_config" >/dev/null <<EOF
 Port $FIXTURE_PORT
-ListenAddress 0.0.0.0
+ListenAddress 127.0.0.1
+LogLevel DEBUG1
 PidFile $FIXTURE_DIR/sshd.pid
 HostKey $FIXTURE_DIR/ssh_host_ed25519_key
+HostKey $FIXTURE_DIR/ssh_host_rsa_key
+HostKey $FIXTURE_DIR/ssh_host_ecdsa_key
 PasswordAuthentication yes
-PubkeyAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile $FIXTURE_DIR/authorized_keys_%u
 ChallengeResponseAuthentication no
 UsePAM no
 StrictModes no
 PrintMotd no
 AcceptEnv TERM_BRIDGE_*
 Subsystem sftp /usr/lib/openssh/sftp-server
+# Match blocks must come last (Subsystem is not allowed inside one).
+Match User $FIXTURE_KEY_USER
+    PasswordAuthentication no
+Match User $FIXTURE_USER
+    PubkeyAuthentication no
 EOF
 
 # Restart the dedicated instance if one is already running.
@@ -90,7 +126,9 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     if (command -v ss >/dev/null 2>&1 && ss -ltn | grep -q ":$FIXTURE_PORT ") || \
        (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$FIXTURE_PORT"); then
         echo "Fixture sshd listening on port $FIXTURE_PORT."
-        sudo ssh-keygen -lf "$FIXTURE_DIR/ssh_host_ed25519_key.pub"
+        for k in ed25519 rsa ecdsa; do
+            sudo ssh-keygen -lf "$FIXTURE_DIR/ssh_host_${k}_key.pub"
+        done
         echo "Fixture user: $FIXTURE_USER (password supplied via FIXTURE_PASSWORD only)."
         exit 0
     fi

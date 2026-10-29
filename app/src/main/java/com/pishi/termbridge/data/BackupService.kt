@@ -203,8 +203,38 @@ class BackupService(
             encrypted = parsed.encrypted,
             hasCredentials = parsed.hasCredentials,
             conflicts = conflicts,
-            warnings = parsed.warnings
+            warnings = parsed.warnings + securityWarnings(parsed.document)
         )
+    }
+
+    /**
+     * Review #2 F-15: the preview used to show only names and counts,
+     * so an imported file could silently bring in settings that change
+     * where traffic goes or what is typed into a shell. These lines
+     * name the host and the setting only — never a value that could
+     * be a secret.
+     */
+    private fun securityWarnings(document: BackupDocument): List<String> {
+        val out = mutableListOf<String>()
+        for (host in document.hosts) {
+            val exposed = host.tunnels.count { it.allowNonLoopback }
+            if (exposed > 0) {
+                out += "\"${host.name}\": $exposed port forward(s) may listen on non-local addresses."
+            }
+            if (host.proxy != null) {
+                out += "\"${host.name}\": connects through a proxy."
+            }
+            if (host.jumpHopExportIds.isNotEmpty()) {
+                out += "\"${host.name}\": connects through ${host.jumpHopExportIds.size} jump host(s)."
+            }
+            if (!host.settings?.remoteWorkingDirectory.isNullOrBlank()) {
+                out += "\"${host.name}\": a directory change is typed into the shell on every connect."
+            }
+            if (host.buttons.isNotEmpty()) {
+                out += "\"${host.name}\": ${host.buttons.size} command button(s) — review them before use."
+            }
+        }
+        return out
     }
 
     suspend fun applyImport(preview: ImportPreview, replaceExisting: Boolean): ImportResult {

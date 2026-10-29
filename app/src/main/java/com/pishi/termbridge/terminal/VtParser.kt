@@ -66,6 +66,11 @@ class VtParser(
     initialRows: Int,
     private val maxScrollback: Int = 1000
 ) {
+    private companion object {
+        /** Longest CSI parameter string kept (review #2 F-07 hardening). */
+        const val MAX_CSI_PARAM_CHARS = 256
+    }
+
     var cols: Int = initialCols
         private set
     var rows: Int = initialRows
@@ -95,6 +100,7 @@ class VtParser(
     private var bold = false
 
     private var state = ParserState.GROUND
+    private var oscSawEsc = false
     private val csiParams = StringBuilder()
     private var csiPrivate = false
 
@@ -111,10 +117,33 @@ class VtParser(
                 ParserState.GROUND -> ground(ch)
                 ParserState.ESCAPE -> escape(ch)
                 ParserState.CSI -> csi(ch)
-                ParserState.OSC -> {
-                    if (ch == '\u0007') state = ParserState.GROUND
-                }
+                ParserState.OSC -> osc(ch)
             }
+        }
+    }
+
+    /**
+     * Review #2 F-08: an OSC string ends with BEL **or** ST (`ESC \\`,
+     * or the C1 form 0x9C). CAN/SUB abort it. A bare ESC followed by
+     * anything other than `\\` starts a new escape sequence. Without
+     * this, a program that terminates its OSC with ST (very common)
+     * left the parser swallowing all later output until some BEL.
+     */
+    private fun osc(ch: Char) {
+        if (oscSawEsc) {
+            oscSawEsc = false
+            if (ch == '\\') {
+                state = ParserState.GROUND
+            } else {
+                state = ParserState.ESCAPE
+                escape(ch)
+            }
+            return
+        }
+        when (ch) {
+            '\u0007', '\u009C', '\u0018', '\u001A' -> state = ParserState.GROUND
+            '\u001B' -> oscSawEsc = true
+            else -> Unit
         }
     }
 
@@ -124,8 +153,10 @@ class VtParser(
             '\r' -> cursorCol = 0
             '\n' -> lineFeed()
             '\b' -> if (cursorCol > 0) cursorCol--
-            '\t' -> cursorCol = ((cursorCol / 8) + 1) * 8
-                .coerceAtMost(cols - 1)
+            // Review #2: the old expression applied coerceAtMost to the
+            // literal 8 (operator precedence), so a tab near the right
+            // edge moved the cursor past the last column and wrapped.
+            '\t' -> cursorCol = (((cursorCol / 8) + 1) * 8).coerceAtMost(cols - 1)
             '\u0007', '\u0000' -> Unit // Bell and NUL: ignored.
             else -> {
                 if (ch.code >= 0x20 && ch.code != 0x7F) {
@@ -142,7 +173,10 @@ class VtParser(
                 csiParams.clear()
                 csiPrivate = false
             }
-            ']' -> state = ParserState.OSC
+            ']' -> {
+                oscSawEsc = false
+                state = ParserState.OSC
+            }
             '7' -> {
                 savedRow = cursorRow
                 savedCol = cursorCol
@@ -176,7 +210,7 @@ class VtParser(
     private fun csi(ch: Char) {
         when {
             ch == '?' && csiParams.isEmpty() -> csiPrivate = true
-            ch.code in 0x30..0x3F -> csiParams.append(ch) // Params + intermediates.
+            ch.code in 0x30..0x3F -> if (csiParams.length < MAX_CSI_PARAM_CHARS) csiParams.append(ch) // Params + intermediates; bounded so endless digits cannot grow it.
             ch.code in 0x40..0x7E -> {
                 if (!csiPrivate) {
                     executeCsi(ch, parseParams())
@@ -238,10 +272,13 @@ class VtParser(
 
     private fun executeCsi(final: Char, params: List<Int>) {
         when (final) {
-            'A' -> cursorRow = (cursorRow - param(params, 0, 1)).coerceAtLeast(0)
-            'B' -> cursorRow = (cursorRow + param(params, 0, 1)).coerceAtMost(rows - 1)
-            'C' -> cursorCol = (cursorCol + param(params, 0, 1)).coerceAtMost(cols - 1)
-            'D' -> cursorCol = (cursorCol - param(params, 0, 1)).coerceAtLeast(0)
+            // Review #2 F-07: Long arithmetic. `ESC[2147483647B` used to
+            // overflow Int to a negative row, the next screen[row]
+            // access threw, and the session was reported as lost.
+            'A' -> cursorRow = (cursorRow.toLong() - param(params, 0, 1)).coerceIn(0L, (rows - 1).toLong()).toInt()
+            'B' -> cursorRow = (cursorRow.toLong() + param(params, 0, 1)).coerceIn(0L, (rows - 1).toLong()).toInt()
+            'C' -> cursorCol = (cursorCol.toLong() + param(params, 0, 1)).coerceIn(0L, (cols - 1).toLong()).toInt()
+            'D' -> cursorCol = (cursorCol.toLong() - param(params, 0, 1)).coerceIn(0L, (cols - 1).toLong()).toInt()
             'H', 'f' -> {
                 cursorRow = (param(params, 0, 1) - 1).coerceIn(0, rows - 1)
                 cursorCol = (param(params, 1, 1) - 1).coerceIn(0, cols - 1)

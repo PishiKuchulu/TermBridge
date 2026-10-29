@@ -73,34 +73,29 @@ object ExportCrypto {
     ): ExportCiphertext {
         require(salt.size == SALT_BYTES) { "Salt must be $SALT_BYTES bytes." }
         require(iv.size == IV_BYTES) { "IV must be $IV_BYTES bytes." }
+        // The derived key lives inside SecretKeySpec, which keeps a
+        // private copy that cannot be wiped; an earlier version wiped
+        // the clone returned by getEncoded(), which achieved nothing
+        // (review #2 F-18). The passphrase array itself IS wiped, in
+        // deriveKey.
         val key = deriveKey(passphrase, salt)
-        try {
-            val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-                init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
-            }
-            return ExportCiphertext(salt.copyOf(), iv.copyOf(), cipher.doFinal(plaintext))
-        } finally {
-            key.encoded?.wipe()
+        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
+            init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
         }
+        return ExportCiphertext(salt.copyOf(), iv.copyOf(), cipher.doFinal(plaintext))
     }
 
     fun decrypt(blob: ExportCiphertext, passphrase: CharArray): ByteArray {
         require(blob.salt.size == SALT_BYTES) { "Salt must be $SALT_BYTES bytes." }
         require(blob.iv.size == IV_BYTES) { "IV must be $IV_BYTES bytes." }
         val key = deriveKey(passphrase, blob.salt)
-        try {
-            val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-                init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, blob.iv))
-            }
-            return try {
-                cipher.doFinal(blob.ciphertext)
-            } catch (e: Exception) {
-                throw ExportCryptoException(
-                    "Wrong passphrase or corrupt backup file."
-                )
-            }
-        } finally {
-            key.encoded?.wipe()
+        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
+            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, blob.iv))
+        }
+        return try {
+            cipher.doFinal(blob.ciphertext)
+        } catch (e: Exception) {
+            throw ExportCryptoException("Wrong passphrase or corrupt backup file.")
         }
     }
 

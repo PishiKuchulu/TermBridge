@@ -30,6 +30,23 @@ object SshFixture {
     val username: String get() = args.getString("fixture_user", "termbridge-test")
     val password: String get() = args.getString("fixture_password", "")
 
+    val keyUsername: String get() = args.getString("fixture_key_user", "termbridge-key")
+    private val keyB64: String get() = args.getString("fixture_key_b64", "")
+
+    /** True only when the public-key user's private key was supplied. */
+    val isKeyConfigured: Boolean get() = keyB64.isNotEmpty()
+
+    /** PEM bytes of the per-run client key (the caller wipes them). */
+    fun keyCredential(): ByteArray = android.util.Base64.decode(keyB64, android.util.Base64.DEFAULT)
+
+    fun keyProfile(): HostProfile = HostProfile(
+        name = "fixture-key",
+        hostname = host,
+        port = port,
+        username = keyUsername,
+        authType = AuthType.PRIVATE_KEY
+    )
+
     /** True only when a password was supplied — the fixture gate. */
     val isConfigured: Boolean get() = password.isNotEmpty()
 

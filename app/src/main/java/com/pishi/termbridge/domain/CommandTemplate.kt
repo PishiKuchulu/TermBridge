@@ -139,7 +139,18 @@ object CommandTemplate {
      * A template with no placeholders never reaches this
      * function, so parameter-free buttons are unaffected.
      */
-    fun shellQuote(value: String, shell: RemoteShell): String = when (shell) {
+    fun shellQuote(value: String, shell: RemoteShell): String {
+        if (shell != RemoteShell.CMD && ControlChars.containsControl(value)) {
+            // Review #2 F-03: quotes do not neutralise control bytes
+            // (^C, ESC, CR/LF reach the line discipline first).
+            throw IllegalArgumentException(
+                "A value contains control characters, which cannot be sent to a terminal safely."
+            )
+        }
+        return quoteChecked(value, shell)
+    }
+
+    private fun quoteChecked(value: String, shell: RemoteShell): String = when (shell) {
         RemoteShell.POSIX -> "'" + value.replace("'", "'\\''") + "'"
         RemoteShell.POWERSHELL -> "'" + value.replace("'", "''") + "'"
         RemoteShell.CMD -> throw IllegalArgumentException(

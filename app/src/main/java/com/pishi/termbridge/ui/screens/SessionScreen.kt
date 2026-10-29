@@ -63,6 +63,7 @@ import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CommandMode
 import com.pishi.termbridge.domain.CommandTemplate
+import com.pishi.termbridge.domain.ControlChars
 import com.pishi.termbridge.domain.HostKeyVerification
 import com.pishi.termbridge.terminal.TerminalCell
 import com.pishi.termbridge.terminal.TerminalSnapshot
@@ -513,7 +514,7 @@ private fun TerminalView(
         AlertDialog(
             onDismissRequest = { pendingPaste = null },
             title = { Text(stringResource(R.string.paste_dialog_title)) },
-            text = { Text(stringResource(R.string.paste_dialog_body, paste)) },
+            text = { Text(stringResource(R.string.paste_dialog_body, ControlChars.visualize(paste))) },
             confirmButton = {
                 TextButton(
                     onClick = {

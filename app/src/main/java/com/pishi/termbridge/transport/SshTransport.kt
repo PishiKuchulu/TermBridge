@@ -98,7 +98,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 // Cleanup must not mask the original error.
             }
             if (e is kotlinx.coroutines.CancellationException) throw e
-            throw SshTransportException(SshErrorMapper.map(e))
+            throw SshTransportException(SshErrorMapper.map(e), SshErrorMapper.diagnose(e))
         }
     }
 
@@ -203,7 +203,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
             }
             if (e is kotlinx.coroutines.CancellationException) throw e
             if (e is SshTransportException) throw e
-            throw SshTransportException(SshErrorMapper.map(e))
+            throw SshTransportException(SshErrorMapper.map(e), SshErrorMapper.diagnose(e))
         }
     }
 
@@ -306,8 +306,16 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
  * SftpException keeps its cause parameter (same latent class,
  * deferred — see SECURITY_FIXES_16.md); it is not touched here.
  */
-class SshTransportException(val error: SshError) :
-    Exception(error.userMessage)
+class SshTransportException(
+    val error: SshError,
+    /** Class/enum names only — see [SshErrorMapper.diagnose]. */
+    val diagnostic: SshDiagnostic? = null
+) : Exception(
+    error.userMessage + (diagnostic?.let { " [${it.code}]" } ?: "")
+) {
+    /** The text to show the user: fixed message plus the secret-free code. */
+    fun userFacingMessage(): String = message ?: error.userMessage
+}
 
 /** Transport-internal connection holder. UI must not use sshClient. */
 class SshjConnection(
