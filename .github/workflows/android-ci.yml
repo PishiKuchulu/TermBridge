@@ -126,6 +126,9 @@ jobs:
   # per run, used only inside the wrapper, and never committed.
   instrumented:
     runs-on: ubuntu-latest
+    # Needed only to push the secret-free triage excerpt branch.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
