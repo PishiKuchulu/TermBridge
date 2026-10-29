@@ -1,5 +1,6 @@
 package com.pishi.termbridge.data
 
+import com.pishi.termbridge.domain.BackupDocument
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CommandButton
 import com.pishi.termbridge.domain.CommandVariable
