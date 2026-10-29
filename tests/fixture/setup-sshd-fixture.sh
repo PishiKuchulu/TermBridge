@@ -82,10 +82,12 @@ if [ ! -f "$FIXTURE_DIR/ssh_host_ecdsa_key" ]; then
     sudo ssh-keygen -t ecdsa -b 256 -f "$FIXTURE_DIR/ssh_host_ecdsa_key" -N "" -q
 fi
 
-# Client key for the public-key user: PEM-format RSA (what sshj's
-# PKCS#8/PEM loader reads), generated per run, never committed.
+# Client key for the public-key user: Ed25519 in OpenSSH format (the
+# format sshj 0.40.0 reads for Ed25519), generated per run, never
+# committed. Not RSA: OpenSSH 8.8+ refuses ssh-rsa (SHA-1) user-auth
+# signatures, which would fail for reasons unrelated to the app.
 sudo rm -f "$FIXTURE_DIR/client_key" "$FIXTURE_DIR/client_key.pub"
-sudo ssh-keygen -t rsa -b 2048 -m PEM -f "$FIXTURE_DIR/client_key" -N "" -q
+sudo ssh-keygen -t ed25519 -f "$FIXTURE_DIR/client_key" -N "" -q
 sudo cp "$FIXTURE_DIR/client_key.pub" "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
 sudo chmod 644 "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
 sudo chmod 644 "$FIXTURE_DIR/client_key"

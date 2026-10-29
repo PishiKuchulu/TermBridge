@@ -28,10 +28,12 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -94,12 +96,21 @@ class SshIntegrationTest {
         needle: String,
         timeoutMs: Long = 30_000
     ) {
-        val found = withTimeoutOrNull(timeoutMs) {
-            session.snapshot.first { snap ->
-                snap.lines.any { it.asText().contains(needle) }
+        // runTest uses VIRTUAL time: a withTimeout inside it fires the
+        // moment the test dispatcher idles, long before real I/O could
+        // answer. Wait on a real-time dispatcher instead.
+        val found = withContext(Dispatchers.Default) {
+            withTimeoutOrNull(timeoutMs) {
+                session.snapshot.first { snap ->
+                    snap.lines.any { it.asText().contains(needle) }
+                }
             }
         }
-        assertNotNull("Timed out waiting for shell output: $needle", found)
+        // The fixture shell is not secret; show what the screen held.
+        assertNotNull(
+            "Timed out waiting for shell output: $needle; screen was:\n${snapshotText(session)}",
+            found
+        )
     }
 
     private suspend fun shell(
@@ -235,14 +246,20 @@ class SshIntegrationTest {
             authType = AuthType.PASSWORD
         )
         val job = launch {
-            transport(store).connect(
-                SshConnectionRequest(
-                    profile = unreachable,
-                    credential = "x".toByteArray(),
-                    connectTimeoutMs = 10_000
-                ),
-                TestDecisionHandler()
-            )
+            try {
+                transport(store).connect(
+                    SshConnectionRequest(
+                        profile = unreachable,
+                        credential = "x".toByteArray(),
+                        connectTimeoutMs = 10_000
+                    ),
+                    TestDecisionHandler()
+                )
+            } catch (_: Exception) {
+                // The blocking connect cannot be interrupted: when the
+                // cancel lands it ends with its own timeout/transport
+                // error. That is the expected shape, not a test failure.
+            }
         }
         delay(500)
         job.cancelAndJoin()

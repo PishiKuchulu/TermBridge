@@ -190,6 +190,8 @@ jobs:
             echo "=== $(basename "$f")" >> "$OUT"
             grep -E "CRYPTO_PROBE|GRADLE_ATTEMPT|Starting [0-9]+ tests|FAILED|PASSED|SKIPPED|tests completed|POSTFAIL: sshd|Unknown API|PropertyFetcher" "$f" | head -c 40000 >> "$OUT" || true
           done
+          echo "=== sshd.log tail" >> "$OUT"
+          sudo tail -n 120 /tmp/termbridge-sshd-fixture/sshd.log >> "$OUT" 2>/dev/null || true
           echo "=== result xml failures" >> "$OUT"
           find "$GITHUB_WORKSPACE/app/build/outputs/androidTest-results" -name 'TEST-*.xml' 2>/dev/null | while read -r x; do
             grep -h -E "<testcase|<failure|<skipped" -A3 "$x" | head -c 40000 >> "$OUT" || true

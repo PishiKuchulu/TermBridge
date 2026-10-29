@@ -212,7 +212,12 @@ class SftpManager(private val connection: SshjConnection) {
             )
             tempWritten = true
             try {
-                counting.copyTo(remote.RemoteFileOutputStream())
+                // Closing the OUTPUT STREAM flushes and waits for the
+                // server to acknowledge every outstanding write; closing
+                // only the RemoteFile does not. Without this the size
+                // check below raced the in-flight writes and reported
+                // "size does not match" on a complete upload.
+                remote.RemoteFileOutputStream().use { out -> counting.copyTo(out) }
             } finally {
                 remote.close()
             }
