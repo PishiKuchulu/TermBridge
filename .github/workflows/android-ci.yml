@@ -169,6 +169,31 @@ jobs:
           ram-size: 4096M
           script: bash tests/fixture/run-instrumented-with-fixture.sh
 
+      # Diagnosis aid (secret-free excerpts only: test names, failure
+      # messages, the crypto probe line, the fixture sshd log lines the
+      # wrapper already prints). The wrapper scrubs the per-run secrets
+      # from result files before this runs.
+      - name: Publish instrumented triage excerpt
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/cilog3 && cd /tmp/cilog3
+          git init -q && git config user.name ci-logs && git config user.email ci-logs@example.invalid
+          OUT="instr-$GITHUB_RUN_NUMBER.txt"
+          : > "$OUT"
+          for f in "$GITHUB_WORKSPACE"/gradle-attempt-*.log; do
+            [ -f "$f" ] || continue
+            echo "=== $(basename "$f")" >> "$OUT"
+            grep -E "CRYPTO_PROBE|GRADLE_ATTEMPT|Starting [0-9]+ tests|FAILED|PASSED|SKIPPED|tests completed|POSTFAIL: sshd|Unknown API|PropertyFetcher" "$f" | head -c 40000 >> "$OUT" || true
+          done
+          echo "=== result xml failures" >> "$OUT"
+          find "$GITHUB_WORKSPACE/app/build/outputs/androidTest-results" -name 'TEST-*.xml' 2>/dev/null | while read -r x; do
+            grep -h -E "<testcase|<failure|<skipped" -A3 "$x" | head -c 40000 >> "$OUT" || true
+          done
+          git add . && git commit -qm "instrumented triage run $GITHUB_RUN_NUMBER"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs-instr
+
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v4
