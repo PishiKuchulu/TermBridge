@@ -48,13 +48,19 @@ jobs:
           set -o pipefail
           ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee gradle-assemble.log
 
-      # Surfaces compiler errors as a single annotation so a red run
-      # is diagnosable from the check-run API without downloading logs.
-      - name: Annotate build errors
+      # Diagnosis aid: on failure, push the Gradle error lines (no
+      # secrets: compiler/test output only) to the throwaway `ci-logs`
+      # branch so a red run can be triaged without downloading logs.
+      - name: Publish build error log
         if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ERR=$(grep -E "^e: |What went wrong|Execution failed|error:" -A3 gradle-assemble.log | head -c 8000 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')
-          echo "::error title=Gradle build errors::$ERR"
+          mkdir -p /tmp/cilog && cd /tmp/cilog
+          git init -q && git config user.name ci-logs && git config user.email ci-logs@example.invalid
+          grep -E "^e: |^w: .*Unresolved|What went wrong|Execution failed|error:|FAILED" -A3 "$GITHUB_WORKSPACE/gradle-assemble.log" | head -c 60000 > "errors-assemble-$GITHUB_RUN_NUMBER.txt" || true
+          git add . && git commit -qm "build errors run $GITHUB_RUN_NUMBER"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -68,11 +74,16 @@ jobs:
           set -o pipefail
           ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee gradle-test.log
 
-      - name: Annotate unit-test errors
+      - name: Publish unit-test error log
         if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ERR=$(grep -E "^e: | FAILED|What went wrong|AssertionError|Exception" -A2 gradle-test.log | head -c 8000 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\r//g;s/\n/%0A/g')
-          echo "::error title=Unit test errors::$ERR"
+          mkdir -p /tmp/cilog2 && cd /tmp/cilog2
+          git init -q && git config user.name ci-logs && git config user.email ci-logs@example.invalid
+          grep -E "^e: | FAILED|What went wrong|AssertionError|Exception" -A3 "$GITHUB_WORKSPACE/gradle-test.log" | head -c 60000 > "errors-tests-$GITHUB_RUN_NUMBER.txt" || true
+          git add . && git commit -qm "test errors run $GITHUB_RUN_NUMBER"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs-tests
 
       # Replaces the previous rolling pre-release with this build.
       # Runs only when the unit tests passed, on pushes to main.
