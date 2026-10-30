@@ -433,8 +433,11 @@ class SshIntegrationTest {
                 CommandRunner(sender).insert(
                     CommandTemplate.prepare(button, emptyMap(), RemoteShell.POSIX, true)
                 )
-                // The text is placed (echoed) but never submitted.
-                awaitOutput(session, "touch $probe")
+                // The text is placed (echoed) but never submitted. Match a
+                // SHORT prefix: prompt + the full probe path is wider than
+                // the 80-column grid, so it wraps across two rows and no
+                // single row would ever contain the whole needle.
+                awaitOutput(session, "touch /tmp/termbridge-it-")
                 delay(2000)
             }
             // Proof it never ran: the probe file must not exist.
