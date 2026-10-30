@@ -426,6 +426,10 @@ class SshIntegrationTest {
                     mode = CommandMode.INSERT_ONLY,
                     template = "touch $probe"
                 )
+                // Typing before the remote shell has printed its prompt
+                // races its start-up (it may reset the line), so wait for
+                // the prompt first, as a person would.
+                awaitOutput(session, "$")
                 CommandRunner(sender).insert(
                     CommandTemplate.prepare(button, emptyMap(), RemoteShell.POSIX, true)
                 )
