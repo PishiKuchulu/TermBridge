@@ -12,12 +12,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -29,6 +38,7 @@ import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AppSettings
 import com.pishi.termbridge.domain.AppSettingsRules
 import com.pishi.termbridge.domain.TerminalThemes
+import com.pishi.termbridge.ui.LockSettingsUi
 import com.pishi.termbridge.ui.theme.Spacing
 import com.pishi.termbridge.ui.theme.TermBridgeTheme
 
@@ -42,6 +52,7 @@ import com.pishi.termbridge.ui.theme.TermBridgeTheme
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
+    lock: LockSettingsUi,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onDiagnostics: () -> Unit,
     onAbout: () -> Unit,
@@ -132,6 +143,9 @@ fun SettingsScreen(
                 }
             }
         )
+
+        SectionHeader(stringResource(R.string.settings_section_lock))
+        LockSection(lock)
 
         SectionHeader(stringResource(R.string.settings_section_security))
         SwitchRow(
@@ -259,10 +273,115 @@ private fun SettingsScreenPreview() {
     TermBridgeTheme {
         SettingsScreen(
             settings = AppSettings(),
+            lock = LockSettingsUi(false, false, false, { true }, { true }, {}),
             onChange = {},
             onDiagnostics = {},
             onAbout = {},
             onBackup = {}
+        )
+    }
+}
+
+@Composable
+private fun LockSection(lock: LockSettingsUi) {
+    var showSet by remember { mutableStateOf(false) }
+    var showDisable by remember { mutableStateOf(false) }
+    SwitchRow(
+        title = stringResource(R.string.settings_pin_lock),
+        hint = if (lock.enabled) {
+            stringResource(R.string.settings_pin_lock_on)
+        } else {
+            stringResource(R.string.settings_pin_lock_note)
+        },
+        checked = lock.enabled,
+        onCheckedChange = { wantOn -> if (wantOn) showSet = true else showDisable = true }
+    )
+    if (lock.enabled) {
+        SwitchRow(
+            title = stringResource(R.string.settings_biometric),
+            hint = if (lock.biometricAvailable) null else stringResource(R.string.settings_biometric_unavailable),
+            checked = lock.biometricOn && lock.biometricAvailable,
+            onCheckedChange = { on -> if (lock.biometricAvailable) lock.setBiometric(on) }
+        )
+    }
+    if (showSet) {
+        var pin by remember { mutableStateOf("") }
+        var confirm by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf<String?>(null) }
+        val invalidText = stringResource(R.string.lock_pin_invalid)
+        val differText = stringResource(R.string.lock_pins_differ)
+        AlertDialog(
+            onDismissRequest = { showSet = false },
+            title = { Text(stringResource(R.string.lock_set_pin_title)) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = pin,
+                        onValueChange = { pin = it.filter { c -> c in '0'..'9' }.take(12) },
+                        label = { Text(stringResource(R.string.lock_set_pin_hint)) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                    )
+                    OutlinedTextField(
+                        value = confirm,
+                        onValueChange = { confirm = it.filter { c -> c in '0'..'9' }.take(12) },
+                        label = { Text(stringResource(R.string.lock_confirm_pin_hint)) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                    )
+                    if (error != null) {
+                        Text(text = error ?: "", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    when {
+                        pin != confirm -> error = differText
+                        !lock.setPin(pin) -> error = invalidText
+                        else -> showSet = false
+                    }
+                }) { Text(stringResource(R.string.action_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSet = false }) { Text(stringResource(R.string.action_cancel)) }
+            }
+        )
+    }
+    if (showDisable) {
+        var current by remember { mutableStateOf("") }
+        var wrong by remember { mutableStateOf(false) }
+        val wrongText = stringResource(R.string.lock_wrong)
+        AlertDialog(
+            onDismissRequest = { showDisable = false },
+            title = { Text(stringResource(R.string.lock_disable_title)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.lock_disable_body))
+                    OutlinedTextField(
+                        value = current,
+                        onValueChange = {
+                            current = it.filter { c -> c in '0'..'9' }.take(12)
+                            wrong = false
+                        },
+                        label = { Text(stringResource(R.string.lock_pin_hint)) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                    )
+                    if (wrong) Text(text = wrongText, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (lock.disable(current)) showDisable = false else wrong = true
+                }) { Text(stringResource(R.string.action_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisable = false }) { Text(stringResource(R.string.action_cancel)) }
+            }
         )
     }
 }

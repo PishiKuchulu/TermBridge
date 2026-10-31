@@ -79,6 +79,7 @@ dependencies {
     // licence match the prompt-01 record (13 May 2025 sources).
     implementation(libs.sshj)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.biometric)
     // Compose BOM must be declared inside dependencies {}, not at the
     // top level (a top-level platform() call fails in Kotlin DSL).
     implementation(platform(libs.androidx.compose.bom))

@@ -147,6 +147,7 @@ fun TermBridgeApp(
     backupService: BackupService,
     appSettings: com.pishi.termbridge.settings.AppSettingsStore,
     connectionLog: com.pishi.termbridge.settings.ConnectionLogStore,
+    lockSettings: com.pishi.termbridge.ui.LockSettingsUi,
     navController: NavHostController = rememberNavController()
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -388,6 +389,7 @@ fun TermBridgeApp(
                 val currentSettings by appSettings.settings.collectAsState()
                 SettingsScreen(
                     settings = currentSettings,
+                    lock = lockSettings,
                     onChange = { transform -> appSettings.update(transform) },
                     onDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
                     onAbout = { navController.navigate(Routes.ABOUT) },

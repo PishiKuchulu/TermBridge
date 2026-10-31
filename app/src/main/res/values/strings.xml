@@ -427,4 +427,25 @@
     <string name="settings_terminal_theme">Colour scheme</string>
     <string name="settings_bell_haptic">Vibrate on terminal bell</string>
     <string name="settings_bell_haptic_hint">A short haptic tick when the server rings the bell.</string>
+    <string name="lock_title">TermBridge is locked</string>
+    <string name="lock_pin_hint">PIN</string>
+    <string name="lock_unlock">Unlock</string>
+    <string name="lock_wrong">Wrong PIN.</string>
+    <string name="lock_throttled">Too many attempts. Try again in %1$d seconds.</string>
+    <string name="lock_use_biometric">Use fingerprint or face</string>
+    <string name="lock_biometric_title">Unlock TermBridge</string>
+    <string name="settings_section_lock">App lock</string>
+    <string name="settings_pin_lock">PIN lock</string>
+    <string name="settings_pin_lock_on">On. Asked after the app has been in the background for 30 seconds.</string>
+    <string name="settings_pin_lock_off">Off</string>
+    <string name="settings_pin_lock_note">Keeps casual users out of an unlocked phone. Saved credentials are encrypted by the Android Keystore either way.</string>
+    <string name="settings_biometric">Fingerprint / face unlock</string>
+    <string name="settings_biometric_unavailable">Not available on this device, or none enrolled.</string>
+    <string name="lock_set_pin_title">Set a PIN</string>
+    <string name="lock_set_pin_hint">4 to 12 digits</string>
+    <string name="lock_confirm_pin_hint">Repeat the PIN</string>
+    <string name="lock_pin_invalid">The PIN must be 4 to 12 digits.</string>
+    <string name="lock_pins_differ">The PINs do not match.</string>
+    <string name="lock_disable_title">Turn off PIN lock</string>
+    <string name="lock_disable_body">Enter the current PIN to turn the lock off.</string>
 </resources>
