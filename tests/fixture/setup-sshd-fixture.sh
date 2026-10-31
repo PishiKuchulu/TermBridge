@@ -42,6 +42,7 @@ set -euo pipefail
 
 FIXTURE_USER="${FIXTURE_USER:-termbridge-test}"
 FIXTURE_KEY_USER="${FIXTURE_KEY_USER:-termbridge-key}"
+FIXTURE_VNC_PORT="${FIXTURE_VNC_PORT:-5901}"
 FIXTURE_PORT="${FIXTURE_PORT:-2222}"
 FIXTURE_DIR="${FIXTURE_DIR:-/tmp/termbridge-sshd-fixture}"
 
@@ -142,3 +143,27 @@ done
 echo "Fixture sshd failed to listen on port $FIXTURE_PORT." >&2
 sudo cat "$FIXTURE_DIR/sshd.log" 2>/dev/null || true
 exit 1
+
+# ---- Optional VNC server for the RFB integration test (best effort) ----
+# A virtual display plus x11vnc on loopback with a per-run password. If
+# the packages cannot be installed the VNC test is skipped (Assume), so
+# this never fails the SSH fixture.
+rm -f /tmp/termbridge-vnc-pass
+if sudo apt-get install -y -qq xvfb x11vnc >/dev/null 2>&1; then
+    VNC_PASS="$(openssl rand -hex 6)"
+    sudo pkill Xvfb >/dev/null 2>&1 || true
+    (Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &)
+    sleep 2
+    x11vnc -storepasswd "$VNC_PASS" /tmp/termbridge-vncauth >/dev/null 2>&1
+    x11vnc -display :99 -rfbport "$FIXTURE_VNC_PORT" -rfbauth /tmp/termbridge-vncauth \
+        -localhost -forever -shared -bg -o /tmp/termbridge-x11vnc.log >/dev/null 2>&1 || true
+    sleep 1
+    if (exec 3<>/dev/tcp/127.0.0.1/"$FIXTURE_VNC_PORT") 2>/dev/null; then
+        printf '%s' "$VNC_PASS" > /tmp/termbridge-vnc-pass
+        echo "VNC fixture ready on 127.0.0.1:$FIXTURE_VNC_PORT"
+    else
+        echo "VNC fixture could not start; the RFB test will be skipped."
+    fi
+else
+    echo "VNC packages unavailable; the RFB test will be skipped."
+fi

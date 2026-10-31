@@ -448,4 +448,25 @@
     <string name="lock_pins_differ">The PINs do not match.</string>
     <string name="lock_disable_title">Turn off PIN lock</string>
     <string name="lock_disable_body">Enter the current PIN to turn the lock off.</string>
+    <string name="desktop_host_hint">Host or IP address</string>
+    <string name="desktop_port_hint">VNC port</string>
+    <string name="desktop_password_hint">VNC password</string>
+    <string name="desktop_no_password">Server has no password</string>
+    <string name="desktop_connect">Connect</string>
+    <string name="desktop_connecting">Connecting…</string>
+    <string name="desktop_disconnect">Disconnect</string>
+    <string name="desktop_connected_to">Connected to %1$s</string>
+    <string name="desktop_warning">VNC is not encrypted. Use it on a trusted network, or through a VPN or SSH tunnel.</string>
+    <string name="desktop_rdp_note">Windows Remote Desktop (RDP) is not supported yet. For Windows, install a VNC server (for example TightVNC, UltraVNC or RealVNC) and connect to it here.</string>
+    <string name="desktop_hint_touch">Tap to click, long-press for right-click, drag to move or drag items.</string>
+    <string name="desktop_key_esc">Esc</string>
+    <string name="desktop_key_tab">Tab</string>
+    <string name="desktop_key_enter">Enter</string>
+    <string name="desktop_key_backspace">Backspace</string>
+    <string name="desktop_key_delete">Del</string>
+    <string name="desktop_key_ctrl_alt_del">Ctrl+Alt+Del</string>
+    <string name="desktop_key_win">Win</string>
+    <string name="desktop_type_hint">Type here to send keys</string>
+    <string name="desktop_invalid_port">Enter a port from 1 to 65535.</string>
+    <string name="desktop_invalid_host">Enter a host name or IP address.</string>
 </resources>

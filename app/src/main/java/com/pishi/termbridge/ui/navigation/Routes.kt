@@ -27,6 +27,7 @@ object Routes {
     const val COMMANDS = "commands"
     const val ADVANCED = "advanced"
     const val DESKTOP = "desktop"
+    const val DESKTOP_PREFILL = "desktop_prefill/{host}"
     const val SETTINGS = "settings"
     const val BACKUP = "backup"
     const val DIAGNOSTICS = "diagnostics"
@@ -35,11 +36,14 @@ object Routes {
     fun hostFormPrefillRoute(prefill: String): String =
         "host_form_prefill/" + android.net.Uri.encode(prefill)
 
+    fun desktopPrefillRoute(host: String): String =
+        "desktop_prefill/" + android.net.Uri.encode(host)
+
     fun hostFormEditRoute(hostId: Long): String = "host_form/$hostId"
     fun hostEnvironmentRoute(hostId: Long): String = "host_environment/$hostId"
 
     val all: List<String> = listOf(
-        VAULT, CONNECTIONS, KNOWN_HOSTS, LOGS, DISCOVER, HOST_FORM_PREFILL,
+        VAULT, CONNECTIONS, KNOWN_HOSTS, DESKTOP_PREFILL, LOGS, DISCOVER, HOST_FORM_PREFILL,
         HOSTS, HOST_FORM, HOST_FORM_EDIT, HOST_ENVIRONMENT, SESSION, FILES, COMMANDS,
         ADVANCED, DESKTOP, SETTINGS, BACKUP, DIAGNOSTICS, ABOUT
     )

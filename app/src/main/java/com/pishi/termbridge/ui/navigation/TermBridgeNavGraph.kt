@@ -85,7 +85,8 @@ private val bottomDestinations = listOf(
 
 /** Which bottom tab a route belongs to, so sub-screens keep their tab highlighted. */
 private fun tabFor(route: String?): String = when (route) {
-    Routes.CONNECTIONS, Routes.SESSION, Routes.FILES, Routes.DESKTOP, Routes.DISCOVER ->
+    Routes.CONNECTIONS, Routes.SESSION, Routes.FILES, Routes.DESKTOP, Routes.DESKTOP_PREFILL,
+    Routes.DISCOVER ->
         Routes.CONNECTIONS
     Routes.SETTINGS, Routes.BACKUP, Routes.DIAGNOSTICS, Routes.ABOUT -> Routes.SETTINGS
     else -> Routes.VAULT
@@ -105,7 +106,7 @@ private fun titleResFor(route: String?): Int = when (route) {
     Routes.FILES -> R.string.files_title
     Routes.COMMANDS -> R.string.commands_title
     Routes.ADVANCED -> R.string.advanced_title
-    Routes.DESKTOP -> R.string.desktop_title
+    Routes.DESKTOP, Routes.DESKTOP_PREFILL -> R.string.desktop_title
     Routes.SETTINGS -> R.string.settings_title
     Routes.BACKUP -> R.string.backup_title
     Routes.DIAGNOSTICS -> R.string.diagnostics_title
@@ -273,11 +274,11 @@ fun TermBridgeApp(
                 DiscoverScreen(
                     viewModel = viewModel<DiscoverViewModel>(),
                     onPick = { address, port ->
-                        // Only SSH (22) becomes a saved host here; VNC/RDP
-                        // ports are shown for information in this release.
-                        navController.navigate(
-                            Routes.hostFormPrefillRoute("$address:$port")
-                        )
+                        if (port == 5900) {
+                            navController.navigate(Routes.desktopPrefillRoute(address))
+                        } else {
+                            navController.navigate(Routes.hostFormPrefillRoute("$address:$port"))
+                        }
                     }
                 )
             }
@@ -384,7 +385,22 @@ fun TermBridgeApp(
                     onAddHost = { navController.navigate(Routes.HOST_FORM) }
                 )
             }
-            composable(Routes.DESKTOP) { RemoteDesktopScreen() }
+            composable(Routes.DESKTOP) {
+                // Activity-scoped so a running VNC session survives
+                // navigating to another screen and back.
+                RemoteDesktopScreen(
+                    viewModel = viewModel(viewModelStoreOwner = activity)
+                )
+            }
+            composable(
+                route = Routes.DESKTOP_PREFILL,
+                arguments = listOf(navArgument("host") { type = NavType.StringType })
+            ) { entry ->
+                RemoteDesktopScreen(
+                    viewModel = viewModel(viewModelStoreOwner = activity),
+                    initialHost = entry.arguments?.getString("host") ?: ""
+                )
+            }
             composable(Routes.SETTINGS) {
                 val currentSettings by appSettings.settings.collectAsState()
                 SettingsScreen(

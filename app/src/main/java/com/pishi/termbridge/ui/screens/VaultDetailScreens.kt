@@ -225,6 +225,16 @@ fun DiscoverScreen(
                         Text(text = device.address, style = MaterialTheme.typography.titleMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.small)) {
                             device.ports.sorted().forEach { port ->
+                                if (port == 3389) {
+                                    // RDP is not supported: shown, not tappable.
+                                    Text(
+                                        text = "RDP · 3389",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(Spacing.small)
+                                    )
+                                    return@forEach
+                                }
                                 TextButton(onClick = { onPick(device.address, port) }) {
                                     Text(
                                         when (port) {
