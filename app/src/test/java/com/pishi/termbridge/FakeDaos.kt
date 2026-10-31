@@ -373,4 +373,7 @@ class FakeTrustedHostKeyDao : TrustedHostKeyDao {
     override suspend fun deleteByEndpoint(endpoint: String) {
         rows.remove(endpoint)
     }
+
+    override fun observeAll(): kotlinx.coroutines.flow.Flow<List<TrustedHostKeyEntity>> =
+        kotlinx.coroutines.flow.flowOf(rows.values.sortedBy { it.endpoint })
 }
