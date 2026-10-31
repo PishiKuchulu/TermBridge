@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +51,14 @@ import com.pishi.termbridge.ui.viewmodel.SessionViewModel
 import com.pishi.termbridge.ui.viewmodel.SessionViewModelFactory
 import com.pishi.termbridge.R
 import com.pishi.termbridge.ui.screens.AboutScreen
+import com.pishi.termbridge.ui.screens.ConnectionsScreen
+import com.pishi.termbridge.ui.screens.DiscoverScreen
+import com.pishi.termbridge.ui.screens.KnownHostsScreen
+import com.pishi.termbridge.ui.screens.LogsScreen
+import com.pishi.termbridge.ui.screens.VaultScreen
+import com.pishi.termbridge.ui.viewmodel.DiscoverViewModel
+import com.pishi.termbridge.ui.viewmodel.KnownHostsViewModelFactory
+import com.pishi.termbridge.ui.viewmodel.LogsViewModelFactory
 import com.pishi.termbridge.ui.screens.BackupScreen
 import com.pishi.termbridge.ui.screens.AdvancedScreen
 import com.pishi.termbridge.ui.screens.CommandsScreen
@@ -69,14 +78,26 @@ private data class BottomDestination(
 )
 
 private val bottomDestinations = listOf(
-    BottomDestination(Routes.HOSTS, R.string.nav_hosts, Icons.Filled.Home),
-    BottomDestination(Routes.FILES, R.string.nav_files, Icons.Filled.Folder),
-    BottomDestination(Routes.COMMANDS, R.string.nav_commands, Icons.Filled.Terminal),
-    BottomDestination(Routes.DESKTOP, R.string.nav_desktop, Icons.Filled.DesktopWindows),
+    BottomDestination(Routes.VAULT, R.string.nav_vaults, Icons.Filled.Lock),
+    BottomDestination(Routes.CONNECTIONS, R.string.nav_connections, Icons.Filled.Terminal),
     BottomDestination(Routes.SETTINGS, R.string.nav_settings, Icons.Filled.Settings)
 )
 
+/** Which bottom tab a route belongs to, so sub-screens keep their tab highlighted. */
+private fun tabFor(route: String?): String = when (route) {
+    Routes.CONNECTIONS, Routes.SESSION, Routes.FILES, Routes.DESKTOP, Routes.DISCOVER ->
+        Routes.CONNECTIONS
+    Routes.SETTINGS, Routes.BACKUP, Routes.DIAGNOSTICS, Routes.ABOUT -> Routes.SETTINGS
+    else -> Routes.VAULT
+}
+
 private fun titleResFor(route: String?): Int = when (route) {
+    Routes.VAULT -> R.string.vault_title
+    Routes.CONNECTIONS -> R.string.connections_title
+    Routes.KNOWN_HOSTS -> R.string.known_hosts_title
+    Routes.LOGS -> R.string.logs_title
+    Routes.DISCOVER -> R.string.discover_title
+    Routes.HOST_FORM_PREFILL -> R.string.host_form_title
     Routes.HOST_FORM -> R.string.host_form_title
     Routes.HOST_FORM_EDIT -> R.string.host_form_edit_title
     Routes.HOST_ENVIRONMENT -> R.string.env_title
@@ -125,6 +146,7 @@ fun TermBridgeApp(
     advancedRepository: AdvancedRepository,
     backupService: BackupService,
     appSettings: com.pishi.termbridge.settings.AppSettingsStore,
+    connectionLog: com.pishi.termbridge.settings.ConnectionLogStore,
     navController: NavHostController = rememberNavController()
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -143,7 +165,8 @@ fun TermBridgeApp(
             repository,
             commandRepository,
             environmentRepository,
-            appSettings
+            appSettings,
+            connectionLog
         ),
         viewModelStoreOwner = activity
     )
@@ -184,12 +207,12 @@ fun TermBridgeApp(
         bottomBar = {
             NavigationBar {
                 bottomDestinations.forEach { destination ->
-                    val selected = currentRoute == destination.route
+                    val selected = tabFor(currentRoute) == destination.route
                     NavigationBarItem(
                         selected = selected,
                         onClick = {
                             navController.navigate(destination.route) {
-                                popUpTo(Routes.HOSTS) { saveState = true }
+                                popUpTo(Routes.VAULT) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
                             }
@@ -208,9 +231,74 @@ fun TermBridgeApp(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Routes.HOSTS,
+            startDestination = Routes.VAULT,
             modifier = Modifier.padding(innerPadding).imePadding()
         ) {
+            composable(Routes.VAULT) {
+                VaultScreen(
+                    onHosts = { navController.navigate(Routes.HOSTS) },
+                    onPortForwarding = { navController.navigate(Routes.ADVANCED) },
+                    onSnippets = { navController.navigate(Routes.COMMANDS) },
+                    onKnownHosts = { navController.navigate(Routes.KNOWN_HOSTS) },
+                    onLogs = { navController.navigate(Routes.LOGS) }
+                )
+            }
+            composable(Routes.CONNECTIONS) {
+                val recent by connectionLog.entries.collectAsState()
+                ConnectionsScreen(
+                    recent = recent,
+                    liveSession = liveSession,
+                    onQuickConnect = { target ->
+                        val text = (target.username?.let { "$it@" } ?: "") +
+                            target.host + ":" + target.port
+                        navController.navigate(Routes.hostFormPrefillRoute(text))
+                    },
+                    onAddHost = { navController.navigate(Routes.HOST_FORM) },
+                    onSftp = { navController.navigate(Routes.FILES) },
+                    onDiscover = { navController.navigate(Routes.DISCOVER) },
+                    onDesktop = { navController.navigate(Routes.DESKTOP) },
+                    onTerminal = { navController.navigate(Routes.SESSION) }
+                )
+            }
+            composable(Routes.KNOWN_HOSTS) {
+                KnownHostsScreen(
+                    viewModel = viewModel(factory = KnownHostsViewModelFactory(repository))
+                )
+            }
+            composable(Routes.LOGS) {
+                LogsScreen(viewModel = viewModel(factory = LogsViewModelFactory(connectionLog)))
+            }
+            composable(Routes.DISCOVER) {
+                DiscoverScreen(
+                    viewModel = viewModel<DiscoverViewModel>(),
+                    onPick = { address, port ->
+                        // Only SSH (22) becomes a saved host here; VNC/RDP
+                        // ports are shown for information in this release.
+                        navController.navigate(
+                            Routes.hostFormPrefillRoute("$address:$port")
+                        )
+                    }
+                )
+            }
+            composable(
+                route = Routes.HOST_FORM_PREFILL,
+                arguments = listOf(navArgument("prefill") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val target = com.pishi.termbridge.domain.QuickConnect.parse(
+                    backStackEntry.arguments?.getString("prefill") ?: ""
+                )
+                val formViewModel: com.pishi.termbridge.ui.viewmodel.HostFormViewModel =
+                    viewModel(factory = HostFormViewModelFactory(repository, null))
+                androidx.compose.runtime.LaunchedEffect(target) {
+                    if (target != null) {
+                        formViewModel.applyPrefill(target.host, target.port, target.username)
+                    }
+                }
+                HostFormScreen(
+                    viewModel = formViewModel,
+                    onSaved = { navController.navigateUp() }
+                )
+            }
             composable(Routes.HOSTS) {
                 HostsScreen(
                     viewModel = viewModel(factory = HostsViewModelFactory(repository)),

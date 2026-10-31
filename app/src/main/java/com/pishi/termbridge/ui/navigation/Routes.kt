@@ -12,6 +12,12 @@ package com.pishi.termbridge.ui.navigation
  * and edit do not collide.
  */
 object Routes {
+    const val VAULT = "vault"
+    const val CONNECTIONS = "connections"
+    const val KNOWN_HOSTS = "known_hosts"
+    const val LOGS = "logs"
+    const val DISCOVER = "discover"
+    const val HOST_FORM_PREFILL = "host_form_prefill/{prefill}"
     const val HOSTS = "hosts"
     const val HOST_FORM = "host_form"
     const val HOST_FORM_EDIT = "host_form/{hostId}"
@@ -26,14 +32,18 @@ object Routes {
     const val DIAGNOSTICS = "diagnostics"
     const val ABOUT = "about"
 
+    fun hostFormPrefillRoute(prefill: String): String =
+        "host_form_prefill/" + android.net.Uri.encode(prefill)
+
     fun hostFormEditRoute(hostId: Long): String = "host_form/$hostId"
     fun hostEnvironmentRoute(hostId: Long): String = "host_environment/$hostId"
 
     val all: List<String> = listOf(
+        VAULT, CONNECTIONS, KNOWN_HOSTS, LOGS, DISCOVER, HOST_FORM_PREFILL,
         HOSTS, HOST_FORM, HOST_FORM_EDIT, HOST_ENVIRONMENT, SESSION, FILES, COMMANDS,
         ADVANCED, DESKTOP, SETTINGS, BACKUP, DIAGNOSTICS, ABOUT
     )
 
     /** Bottom-bar destinations, in display order. */
-    val bottomBar: List<String> = listOf(HOSTS, FILES, COMMANDS, DESKTOP, SETTINGS)
+    val bottomBar: List<String> = listOf(VAULT, CONNECTIONS, SETTINGS)
 }

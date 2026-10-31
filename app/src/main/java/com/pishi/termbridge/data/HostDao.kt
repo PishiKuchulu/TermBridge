@@ -35,4 +35,7 @@ interface TrustedHostKeyDao {
 
     @Query("DELETE FROM trusted_host_keys WHERE endpoint = :endpoint")
     suspend fun deleteByEndpoint(endpoint: String)
+
+    @Query("SELECT * FROM trusted_host_keys ORDER BY endpoint COLLATE NOCASE")
+    fun observeAll(): kotlinx.coroutines.flow.Flow<List<TrustedHostKeyEntity>>
 }

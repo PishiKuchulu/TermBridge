@@ -54,7 +54,8 @@ class MainActivity : ComponentActivity() {
                     environmentRepository = app.environmentRepository,
                     advancedRepository = app.advancedRepository,
                     backupService = app.backupService,
-                    appSettings = app.appSettings
+                    appSettings = app.appSettings,
+                    connectionLog = app.connectionLog
                 )
             }
         }
