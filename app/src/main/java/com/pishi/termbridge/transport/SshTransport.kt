@@ -87,6 +87,9 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 pendingTrust?.let {
                     trustStore.trustHostKey(it.endpoint, it.fingerprint, it.keyType)
                 }
+                if (request.keepAliveSeconds > 0) {
+                    client.connection.keepAlive.keepAliveInterval = request.keepAliveSeconds
+                }
                 SshjConnection(profile, client)
             }
         } catch (e: Throwable) {

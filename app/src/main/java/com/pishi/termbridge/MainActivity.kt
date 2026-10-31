@@ -5,6 +5,9 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.pishi.termbridge.ui.navigation.TermBridgeApp
 import com.pishi.termbridge.ui.theme.TermBridgeTheme
 
@@ -25,17 +28,33 @@ import com.pishi.termbridge.ui.theme.TermBridgeTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         val app = application as TermBridgeApplication
+        // Apply the stored choice before the first frame (no window in
+        // which a protected screen is briefly capturable).
+        if (app.appSettings.settings.value.blockScreenshots) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         setContent {
+            // FLAG_SECURE follows the user's "block screenshots"
+            // setting (default ON, so behaviour is unchanged until the
+            // user turns it off).
+            val prefs by app.appSettings.settings.collectAsState()
+            LaunchedEffect(prefs.blockScreenshots) {
+                if (prefs.blockScreenshots) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
             TermBridgeTheme {
                 TermBridgeApp(
                     repository = app.hostRepository,
                     commandRepository = app.commandRepository,
                     environmentRepository = app.environmentRepository,
                     advancedRepository = app.advancedRepository,
-                    backupService = app.backupService
+                    backupService = app.backupService,
+                    appSettings = app.appSettings
                 )
             }
         }

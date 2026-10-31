@@ -355,4 +355,25 @@
     <string name="about_body">TermBridge is an independent app for managing remote servers over SSH. It is not affiliated with any other terminal or remote-access product, and it contains no copied branding, code, or assets from one.</string>
     <string name="about_licenses_title">Libraries</string>
     <string name="about_licenses_body">Jetpack Compose (BOM 2024.09.00), Navigation Compose 2.8.0, Kotlin Coroutines 1.8.1, Room 2.6.1, sshj 0.40.0, kotlinx-serialization-json 1.7.3, Material Icons Extended (Compose BOM 2024.09.00), and the AndroidX core, lifecycle, and activity libraries — all Apache License 2.0. Test-only dependencies (JUnit, Espresso, Compose UI test) are not shipped in the app.</string>
+
+    <string name="settings_section_terminal">Terminal</string>
+    <string name="settings_section_session">Session</string>
+    <string name="settings_section_security">Security &amp; privacy</string>
+    <string name="settings_section_data">Data &amp; support</string>
+    <string name="settings_font_size">Font size</string>
+    <string name="settings_font_size_value">%1$d sp</string>
+    <string name="settings_scrollback">Scrollback buffer</string>
+    <string name="settings_scrollback_value">%1$d lines</string>
+    <string name="settings_terminal_type">Terminal type</string>
+    <string name="settings_terminal_type_hint">Tap to cycle. Applies to the next connection.</string>
+    <string name="settings_keep_screen_on">Keep screen on in terminal</string>
+    <string name="settings_keep_screen_on_hint">Prevents the display from sleeping while the terminal is open.</string>
+    <string name="settings_keepalive">Keep-alive interval</string>
+    <string name="settings_keepalive_off">Off</string>
+    <string name="settings_keepalive_value">%1$d seconds</string>
+    <string name="settings_keepalive_hint">Sends a heartbeat so idle connections are not dropped. Applies to the next connection.</string>
+    <string name="settings_block_screenshots">Block screenshots and screen recording</string>
+    <string name="settings_block_screenshots_hint">Hides terminal content from screenshots and the Recents preview.</string>
+    <string name="settings_font_smaller">Smaller</string>
+    <string name="settings_font_larger">Larger</string>
 </resources>

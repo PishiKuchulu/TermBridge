@@ -29,6 +29,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,6 +50,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -104,6 +106,12 @@ fun SessionScreen(
 ) {
     val hosts by viewModel.hosts.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val prefs by viewModel.settings.collectAsState()
+    val hostView = LocalView.current
+    DisposableEffect(prefs.keepScreenOn) {
+        hostView.keepScreenOn = prefs.keepScreenOn
+        onDispose { hostView.keepScreenOn = false }
+    }
     val terminalSnapshot by viewModel.terminalSnapshot.collectAsState()
     val commandButtons by viewModel.commandButtons.collectAsState()
     val blockedMessage by viewModel.blockedMessage.collectAsState()
@@ -556,9 +564,11 @@ private fun TerminalView(
                 .background(Color.Black)
         ) {
             // PTY size from measured area: ~8dp per monospace char,
-            // ~20dp per line at 13sp. Approximation, documented.
-            val cols = (maxWidth.value / 8f).toInt().coerceAtLeast(20)
-            val rows = (maxHeight.value / 20f).toInt().coerceAtLeast(10)
+            // ~20dp per line at 13sp, scaled with the user's font
+            // size. Approximation, documented.
+            val scale = prefs.terminalFontSp / 13f
+            val cols = (maxWidth.value / (8f * scale)).toInt().coerceAtLeast(20)
+            val rows = (maxHeight.value / (20f * scale)).toInt().coerceAtLeast(10)
             LaunchedEffect(cols, rows) {
                 viewModel.resizeTerminal(cols, rows)
             }
@@ -572,7 +582,7 @@ private fun TerminalView(
                                 cursorCol = snapshot.cursorCol
                             ),
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
+                            fontSize = prefs.terminalFontSp.sp,
                             color = Color.White,
                             modifier = Modifier.fillMaxWidth()
                         )

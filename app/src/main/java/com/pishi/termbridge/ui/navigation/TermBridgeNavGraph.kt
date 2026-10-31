@@ -124,6 +124,7 @@ fun TermBridgeApp(
     environmentRepository: HostEnvironmentRepository,
     advancedRepository: AdvancedRepository,
     backupService: BackupService,
+    appSettings: com.pishi.termbridge.settings.AppSettingsStore,
     navController: NavHostController = rememberNavController()
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -141,7 +142,8 @@ fun TermBridgeApp(
         factory = SessionViewModelFactory(
             repository,
             commandRepository,
-            environmentRepository
+            environmentRepository,
+            appSettings
         ),
         viewModelStoreOwner = activity
     )
@@ -295,7 +297,10 @@ fun TermBridgeApp(
             }
             composable(Routes.DESKTOP) { RemoteDesktopScreen() }
             composable(Routes.SETTINGS) {
+                val currentSettings by appSettings.settings.collectAsState()
                 SettingsScreen(
+                    settings = currentSettings,
+                    onChange = { transform -> appSettings.update(transform) },
                     onDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
                     onAbout = { navController.navigate(Routes.ABOUT) },
                     onBackup = { navController.navigate(Routes.BACKUP) }

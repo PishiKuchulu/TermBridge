@@ -105,8 +105,13 @@ data class EnvStatus(
 class SessionViewModel(
     private val repository: HostRepository,
     private val commandRepository: CommandRepository,
-    private val environmentRepository: HostEnvironmentRepository
+    private val environmentRepository: HostEnvironmentRepository,
+    private val appSettings: com.pishi.termbridge.settings.AppSettingsStore? = null
 ) : ViewModel() {
+    /** Live user preferences (font size, scrollback, keep-alive...). */
+    val settings: StateFlow<com.pishi.termbridge.domain.AppSettings> =
+        appSettings?.settings ?: MutableStateFlow(com.pishi.termbridge.domain.AppSettings())
+
     private val transport = SshTransport(repository)
 
     val hosts: StateFlow<List<HostProfile>> = repository.getHosts()
@@ -266,7 +271,8 @@ class SessionViewModel(
                     SshConnectionRequest(
                         profile = profile,
                         credential = credentialBytes,
-                        passphrase = passphraseChars
+                        passphrase = passphraseChars,
+                        keepAliveSeconds = settings.value.keepAliveSeconds
                     ),
                     decisionHandler
                 )
@@ -285,7 +291,12 @@ class SessionViewModel(
                     )
                     return@launch
                 }
-                val terminal = TerminalSession(sshjConn, 80, 24)
+                val prefs = settings.value
+                val terminal = TerminalSession(
+                    sshjConn, 80, 24,
+                    terminalType = prefs.terminalType,
+                    scrollbackLines = prefs.scrollbackLines
+                )
                 terminal.onClosed = { error ->
                     // Runs on the terminal's IO threads: atomic update.
                     _uiState.update {
@@ -662,12 +673,13 @@ class SessionViewModel(
 class SessionViewModelFactory(
     private val repository: HostRepository,
     private val commandRepository: CommandRepository,
-    private val environmentRepository: HostEnvironmentRepository
+    private val environmentRepository: HostEnvironmentRepository,
+    private val appSettings: com.pishi.termbridge.settings.AppSettingsStore? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SessionViewModel::class.java)) {
-            return SessionViewModel(repository, commandRepository, environmentRepository) as T
+            return SessionViewModel(repository, commandRepository, environmentRepository, appSettings) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
