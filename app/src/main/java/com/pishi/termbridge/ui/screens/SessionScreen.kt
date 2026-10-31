@@ -29,6 +29,17 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.pishi.termbridge.domain.TerminalTheme
+import com.pishi.termbridge.domain.TerminalThemes
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -107,6 +118,9 @@ fun SessionScreen(
     val hosts by viewModel.hosts.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val prefs by viewModel.settings.collectAsState()
+    // About 60% of the screen (never below 320dp) instead of a fixed
+    // 420dp, so tall phones and tablets get a usable terminal.
+    val terminalHeight = maxOf(LocalConfiguration.current.screenHeightDp * 0.6f, 320f).dp
     val hostView = LocalView.current
     DisposableEffect(prefs.keepScreenOn) {
         hostView.keepScreenOn = prefs.keepScreenOn
@@ -182,7 +196,7 @@ fun SessionScreen(
                 inputEnabled = uiState.status == SessionStatus.CONNECTED,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(420.dp)
+                    .height(terminalHeight)
             )
             Spacer(modifier = Modifier.height(Spacing.medium))
         }
@@ -425,33 +439,17 @@ fun SessionScreen(
     }
 }
 
-private fun ansiColor(code: Int, default: Color): Color = when (code) {
-    -1 -> default
-    0 -> Color.Black
-    1 -> Color(0xFFCC0000)
-    2 -> Color(0xFF00AA00)
-    3 -> Color(0xFFCCAA00)
-    4 -> Color(0xFF0000CC)
-    5 -> Color(0xFFCC00CC)
-    6 -> Color(0xFF00AAAA)
-    7 -> Color.White
-    8 -> Color.Gray
-    9 -> Color.Red
-    10 -> Color.Green
-    11 -> Color.Yellow
-    12 -> Color.Blue
-    13 -> Color.Magenta
-    14 -> Color.Cyan
-    15 -> Color.White
-    else -> default
-}
+private fun paletteColor(theme: TerminalTheme, code: Int, default: Color): Color =
+    if (code in 0..15) Color(theme.ansi[code]) else default
 
 private fun lineToAnnotated(
     line: List<TerminalCell>,
     isCursorLine: Boolean,
-    cursorCol: Int
+    cursorCol: Int,
+    theme: TerminalTheme
 ): AnnotatedString {
     val builder = AnnotatedString.Builder()
+    val defaultFg = Color(theme.foreground)
     var index = 0
     while (index < line.size) {
         val cell = line[index]
@@ -462,8 +460,8 @@ private fun lineToAnnotated(
             end++
         }
         val isCursor = isCursorLine && cursorCol in index until end
-        val fg = if (isCursor) Color.Black else ansiColor(cell.fg, Color.White)
-        val bg = if (isCursor) Color.White else ansiColor(cell.bg, Color.Transparent)
+        val fg = if (isCursor) Color(theme.background) else paletteColor(theme, cell.fg, defaultFg)
+        val bg = if (isCursor) Color(theme.cursor) else paletteColor(theme, cell.bg, Color.Transparent)
         builder.pushStyle(
             SpanStyle(
                 color = fg,
@@ -488,6 +486,16 @@ private fun TerminalView(
     modifier: Modifier = Modifier
 ) {
     val prefs by viewModel.settings.collectAsState()
+    val theme = TerminalThemes.byId(prefs.terminalTheme)
+    val currentFont by rememberUpdatedState(prefs.terminalFontSp)
+    val haptic = LocalHapticFeedback.current
+    var lastBell by remember { mutableStateOf(snapshot.bellCount) }
+    LaunchedEffect(snapshot.bellCount) {
+        if (snapshot.bellCount > lastBell && prefs.bellHaptic) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+        lastBell = snapshot.bellCount
+    }
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
     var pendingPaste by remember { mutableStateOf<String?>(null) }
@@ -562,7 +570,30 @@ private fun TerminalView(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(Color.Black)
+                .background(Color(theme.background))
+                .pointerInput(Unit) {
+                    // Two-finger pinch changes the font size; a single
+                    // finger is left alone so scrolling and text
+                    // selection still work.
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        var accumulated = 1f
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.changes.size >= 2) {
+                                accumulated *= event.calculateZoom()
+                                if (accumulated > 1.15f) {
+                                    viewModel.setFontSize(currentFont + 1)
+                                    accumulated = 1f
+                                } else if (accumulated < 0.87f) {
+                                    viewModel.setFontSize(currentFont - 1)
+                                    accumulated = 1f
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
         ) {
             // PTY size from measured area: ~8dp per monospace char,
             // ~20dp per line at 13sp, scaled with the user's font
@@ -580,11 +611,12 @@ private fun TerminalView(
                             text = lineToAnnotated(
                                 line,
                                 isCursorLine = lineIndex == snapshot.cursorRow,
-                                cursorCol = snapshot.cursorCol
+                                cursorCol = snapshot.cursorCol,
+                                theme = theme
                             ),
                             fontFamily = FontFamily.Monospace,
                             fontSize = prefs.terminalFontSp.sp,
-                            color = Color.White,
+                            color = Color(theme.foreground),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AppSettings
 import com.pishi.termbridge.domain.AppSettingsRules
+import com.pishi.termbridge.domain.TerminalThemes
 import com.pishi.termbridge.ui.theme.Spacing
 import com.pishi.termbridge.ui.theme.TermBridgeTheme
 
@@ -88,6 +89,22 @@ fun SettingsScreen(
                     )
                 }
             }
+        )
+        ChoiceRow(
+            title = stringResource(R.string.settings_terminal_theme),
+            value = TerminalThemes.byId(settings.terminalTheme).label,
+            onClick = {
+                onChange {
+                    val ids = TerminalThemes.all.map { t -> t.id }
+                    it.copy(terminalTheme = AppSettingsRules.next(ids, it.terminalTheme))
+                }
+            }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_bell_haptic),
+            hint = stringResource(R.string.settings_bell_haptic_hint),
+            checked = settings.bellHaptic,
+            onCheckedChange = { checked -> onChange { it.copy(bellHaptic = checked) } }
         )
         SwitchRow(
             title = stringResource(R.string.settings_keep_screen_on),

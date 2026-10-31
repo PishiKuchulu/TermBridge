@@ -131,6 +131,11 @@ class SessionViewModel(
         )
     }
 
+    /** Pinch-to-zoom target: persists the new font size (clamped by the store). */
+    fun setFontSize(sp: Int) {
+        appSettings?.update { it.copy(terminalFontSp = sp) }
+    }
+
     /** Live user preferences (font size, scrollback, keep-alive...). */
     val settings: StateFlow<com.pishi.termbridge.domain.AppSettings> =
         appSettings?.settings ?: MutableStateFlow(com.pishi.termbridge.domain.AppSettings())

@@ -424,4 +424,7 @@
     <string name="discover_none">Nothing found on this network.</string>
     <string name="discover_no_network">No local network address available. Connect to Wi-Fi first.</string>
     <string name="action_confirm">Confirm</string>
+    <string name="settings_terminal_theme">Colour scheme</string>
+    <string name="settings_bell_haptic">Vibrate on terminal bell</string>
+    <string name="settings_bell_haptic_hint">A short haptic tick when the server rings the bell.</string>
 </resources>

@@ -18,7 +18,11 @@ data class AppSettings(
     /** SSH keep-alive interval in seconds; 0 turns it off. */
     val keepAliveSeconds: Int = DEFAULT_KEEPALIVE,
     /** Block screenshots, screen recording and the Recents preview. */
-    val blockScreenshots: Boolean = true
+    val blockScreenshots: Boolean = true,
+    /** Terminal colour scheme id (see [TerminalThemes]). */
+    val terminalTheme: String = TerminalThemes.CLASSIC.id,
+    /** Haptic tick when the server rings the terminal bell. */
+    val bellHaptic: Boolean = true
 ) {
     companion object {
         const val DEFAULT_FONT_SP = 13
@@ -55,7 +59,13 @@ object AppSettingsRules {
         } else {
             AppSettings.DEFAULT_KEEPALIVE
         },
-        blockScreenshots = raw.blockScreenshots
+        blockScreenshots = raw.blockScreenshots,
+        terminalTheme = if (TerminalThemes.all.any { it.id == raw.terminalTheme }) {
+            raw.terminalTheme
+        } else {
+            TerminalThemes.CLASSIC.id
+        },
+        bellHaptic = raw.bellHaptic
     )
 
     /** Next value in [choices] after [current], wrapping to the first. */

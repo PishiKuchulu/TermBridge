@@ -31,6 +31,8 @@ class AppSettingsStore(context: Context) {
             .putBoolean(K_KEEP_ON, next.keepScreenOn)
             .putInt(K_KEEPALIVE, next.keepAliveSeconds)
             .putBoolean(K_BLOCK, next.blockScreenshots)
+            .putString(K_THEME, next.terminalTheme)
+            .putBoolean(K_BELL, next.bellHaptic)
             .apply()
         _settings.value = next
     }
@@ -44,7 +46,9 @@ class AppSettingsStore(context: Context) {
                 terminalType = prefs.getString(K_TERM, d.terminalType) ?: d.terminalType,
                 keepScreenOn = prefs.getBoolean(K_KEEP_ON, d.keepScreenOn),
                 keepAliveSeconds = prefs.getInt(K_KEEPALIVE, d.keepAliveSeconds),
-                blockScreenshots = prefs.getBoolean(K_BLOCK, d.blockScreenshots)
+                blockScreenshots = prefs.getBoolean(K_BLOCK, d.blockScreenshots),
+                terminalTheme = prefs.getString(K_THEME, d.terminalTheme) ?: d.terminalTheme,
+                bellHaptic = prefs.getBoolean(K_BELL, d.bellHaptic)
             )
         )
     }
@@ -57,5 +61,7 @@ class AppSettingsStore(context: Context) {
         const val K_KEEP_ON = "keep_screen_on"
         const val K_KEEPALIVE = "keepalive_seconds"
         const val K_BLOCK = "block_screenshots"
+        const val K_THEME = "terminal_theme"
+        const val K_BELL = "bell_haptic"
     }
 }
