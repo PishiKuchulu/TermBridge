@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pishi.termbridge.domain.RfbKeys
 import com.pishi.termbridge.transport.RfbConnector
-import com.pishi.termbridge.transport.RfbException
+import com.pishi.termbridge.domain.RfbException
 import com.pishi.termbridge.transport.RfbServerMessage
 import com.pishi.termbridge.transport.RfbSession
 import kotlinx.coroutines.Dispatchers
