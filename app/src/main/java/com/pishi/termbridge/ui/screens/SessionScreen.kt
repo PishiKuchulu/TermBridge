@@ -487,6 +487,7 @@ private fun TerminalView(
     inputEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val prefs by viewModel.settings.collectAsState()
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
     var pendingPaste by remember { mutableStateOf<String?>(null) }
