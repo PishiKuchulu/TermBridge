@@ -193,6 +193,8 @@ jobs:
             grep -E "What went wrong|Process crashed|Test run failed|Instrumentation|INSTRUMENTATION|Exception|crash|ANR|No tests" -A4 "$f" | grep -v "^[[:space:]]*at " | head -c 8000 >> "$OUT" || true
             tail -n 40 "$f" | grep -v "^[[:space:]]*at " >> "$OUT" || true
           done
+          echo "=== vnc fixture status" >> "$OUT"
+          tail -n 40 /tmp/termbridge-vnc-status.txt >> "$OUT" 2>/dev/null || true
           echo "=== sshd.log tail" >> "$OUT"
           sudo tail -n 60 /tmp/termbridge-sshd-fixture/sshd.log >> "$OUT" 2>/dev/null || true
           echo "=== sshd.log key-user lines" >> "$OUT"

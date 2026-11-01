@@ -22,6 +22,7 @@ class MainActivitySmokeTest {
 
     @Test
     fun hostsShellIsDisplayed() {
-        composeRule.onNodeWithText("No hosts yet").assertIsDisplayed()
+        // The app now starts on the Vault hub; "Hosts" is its first entry.
+        composeRule.onNodeWithText("Hosts").assertIsDisplayed()
     }
 }
