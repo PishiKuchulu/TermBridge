@@ -121,29 +121,6 @@ Match User $FIXTURE_USER
 EOF
 
 # Restart the dedicated instance if one is already running.
-if [ -f "$FIXTURE_DIR/sshd.pid" ] && sudo kill -0 "$(cat "$FIXTURE_DIR/sshd.pid")" 2>/dev/null; then
-    sudo kill "$(cat "$FIXTURE_DIR/sshd.pid")"
-    sleep 1
-fi
-sudo /usr/sbin/sshd -f "$FIXTURE_DIR/sshd_config" -E "$FIXTURE_DIR/sshd.log"
-
-# Verify: sshd must actually be listening, or fail the job.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if (command -v ss >/dev/null 2>&1 && ss -ltn | grep -q ":$FIXTURE_PORT ") || \
-       (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$FIXTURE_PORT"); then
-        echo "Fixture sshd listening on port $FIXTURE_PORT."
-        for k in ed25519 rsa ecdsa; do
-            sudo ssh-keygen -lf "$FIXTURE_DIR/ssh_host_${k}_key.pub"
-        done
-        echo "Fixture user: $FIXTURE_USER (password supplied via FIXTURE_PASSWORD only)."
-        exit 0
-    fi
-    sleep 1
-done
-echo "Fixture sshd failed to listen on port $FIXTURE_PORT." >&2
-sudo cat "$FIXTURE_DIR/sshd.log" 2>/dev/null || true
-exit 1
-
 # ---- Optional VNC server for the RFB integration test (best effort) ----
 # A virtual display plus x11vnc on loopback with a per-run password. If
 # anything fails, the reason is written to /tmp/termbridge-vnc-status.txt
@@ -175,3 +152,26 @@ if command -v x11vnc >/dev/null 2>&1 && command -v Xvfb >/dev/null 2>&1; then
 else
     echo "VNC packages missing; the RFB test will be skipped." | tee -a "$STATUS"
 fi
+
+if [ -f "$FIXTURE_DIR/sshd.pid" ] && sudo kill -0 "$(cat "$FIXTURE_DIR/sshd.pid")" 2>/dev/null; then
+    sudo kill "$(cat "$FIXTURE_DIR/sshd.pid")"
+    sleep 1
+fi
+sudo /usr/sbin/sshd -f "$FIXTURE_DIR/sshd_config" -E "$FIXTURE_DIR/sshd.log"
+
+# Verify: sshd must actually be listening, or fail the job.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if (command -v ss >/dev/null 2>&1 && ss -ltn | grep -q ":$FIXTURE_PORT ") || \
+       (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$FIXTURE_PORT"); then
+        echo "Fixture sshd listening on port $FIXTURE_PORT."
+        for k in ed25519 rsa ecdsa; do
+            sudo ssh-keygen -lf "$FIXTURE_DIR/ssh_host_${k}_key.pub"
+        done
+        echo "Fixture user: $FIXTURE_USER (password supplied via FIXTURE_PASSWORD only)."
+        exit 0
+    fi
+    sleep 1
+done
+echo "Fixture sshd failed to listen on port $FIXTURE_PORT." >&2
+sudo cat "$FIXTURE_DIR/sshd.log" 2>/dev/null || true
+exit 1
