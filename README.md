@@ -102,7 +102,7 @@ without a fixture the fixture tests skip via Assume.
 
 ## Permissions, privacy, security
 
-- Permissions: INTERNET + ACCESS_NETWORK_STATE only.
+- Permissions: INTERNET + ACCESS_NETWORK_STATE, plus USE_BIOMETRIC contributed by the AndroidX biometric library for the optional app lock (to be re-verified from the merged manifest).
   `allowBackup=false` (export is the migration path);
   cleartext traffic forbidden; one exported activity
   (the launcher); FLAG_SECURE on the app window.

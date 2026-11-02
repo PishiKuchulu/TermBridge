@@ -102,7 +102,7 @@ the wrong value would break wrapper validation.
   backup rule and may revisit this only with an explicit decision).
 - `usesCleartextTraffic = false` + fail-closed network security config
   (system trust anchors only).
-- Permissions: `INTERNET` + `ACCESS_NETWORK_STATE` only.
+- Permissions: INTERNET + ACCESS_NETWORK_STATE, plus USE_BIOMETRIC contributed by the AndroidX biometric library for the optional app lock (to be re-verified from the merged manifest).
 - `.gitignore` blocks keystores, `.p12/.pfx/.pem/.key`, `key.properties`,
   `local.properties`, build output, and any governance/prompt-pack
   directory copied into the tree by mistake.
