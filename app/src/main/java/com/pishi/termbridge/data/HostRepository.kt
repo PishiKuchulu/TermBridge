@@ -261,4 +261,13 @@ class HostRepository(
         notes = notes,
         tags = tags
     )
+
+    /** All remembered host keys (the "Known hosts" screen). */
+    fun observeTrustedKeys(): kotlinx.coroutines.flow.Flow<List<TrustedHostKeyEntity>> =
+        trustedHostKeyDao.observeAll()
+
+    /** Forget one host key; the next connection asks the user again. */
+    suspend fun forgetTrustedKey(endpoint: String) {
+        trustedHostKeyDao.deleteByEndpoint(endpoint)
+    }
 }

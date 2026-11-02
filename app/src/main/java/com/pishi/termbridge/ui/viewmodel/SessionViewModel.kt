@@ -105,8 +105,41 @@ data class EnvStatus(
 class SessionViewModel(
     private val repository: HostRepository,
     private val commandRepository: CommandRepository,
-    private val environmentRepository: HostEnvironmentRepository
+    private val environmentRepository: HostEnvironmentRepository,
+    private val appSettings: com.pishi.termbridge.settings.AppSettingsStore? = null,
+    private val connectionLog: com.pishi.termbridge.settings.ConnectionLogStore? = null
 ) : ViewModel() {
+    private var sessionStartedAt = 0L
+    private var sessionHostName = ""
+
+    /** Local history line; never stores terminal output or secrets. */
+    private fun logEntry(
+        hostName: String,
+        outcome: com.pishi.termbridge.domain.ConnectionOutcome,
+        durationMs: Long = 0L,
+        detail: String = ""
+    ) {
+        if (hostName.isBlank()) return
+        connectionLog?.record(
+            com.pishi.termbridge.domain.ConnectionLogEntry(
+                timestampMs = System.currentTimeMillis(),
+                hostName = hostName,
+                outcome = outcome,
+                durationMs = durationMs,
+                detail = detail
+            )
+        )
+    }
+
+    /** Pinch-to-zoom target: persists the new font size (clamped by the store). */
+    fun setFontSize(sp: Int) {
+        appSettings?.update { it.copy(terminalFontSp = sp) }
+    }
+
+    /** Live user preferences (font size, scrollback, keep-alive...). */
+    val settings: StateFlow<com.pishi.termbridge.domain.AppSettings> =
+        appSettings?.settings ?: MutableStateFlow(com.pishi.termbridge.domain.AppSettings())
+
     private val transport = SshTransport(repository)
 
     val hosts: StateFlow<List<HostProfile>> = repository.getHosts()
@@ -242,6 +275,7 @@ class SessionViewModel(
             var envValues: List<EnvVarValue> = emptyList()
             try {
                 val profile = repository.getHost(hostId)
+                sessionHostName = profile?.name ?: ""
                 if (profile == null) {
                     _uiState.value = _uiState.value.copy(
                         status = SessionStatus.FAILED,
@@ -266,7 +300,8 @@ class SessionViewModel(
                     SshConnectionRequest(
                         profile = profile,
                         credential = credentialBytes,
-                        passphrase = passphraseChars
+                        passphrase = passphraseChars,
+                        keepAliveSeconds = settings.value.keepAliveSeconds
                     ),
                     decisionHandler
                 )
@@ -285,9 +320,21 @@ class SessionViewModel(
                     )
                     return@launch
                 }
-                val terminal = TerminalSession(sshjConn, 80, 24)
+                val prefs = settings.value
+                val terminal = TerminalSession(
+                    sshjConn, 80, 24,
+                    terminalType = prefs.terminalType,
+                    scrollbackLines = prefs.scrollbackLines
+                )
                 terminal.onClosed = { error ->
                     // Runs on the terminal's IO threads: atomic update.
+                    if (sessionStartedAt > 0L) {
+                        logEntry(
+                            sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.CLOSED,
+                            durationMs = System.currentTimeMillis() - sessionStartedAt
+                        )
+                        sessionStartedAt = 0L
+                    }
                     _uiState.update {
                         if (it.status == SessionStatus.CONNECTED) {
                             it.copy(
@@ -354,6 +401,8 @@ class SessionViewModel(
                         )
                     }
                 }
+                sessionStartedAt = System.currentTimeMillis()
+                logEntry(profile.name, com.pishi.termbridge.domain.ConnectionOutcome.CONNECTED)
                 _uiState.value = _uiState.value.copy(
                     status = SessionStatus.CONNECTED,
                     connectedHost = profile,
@@ -377,6 +426,10 @@ class SessionViewModel(
                 // it; whoever cancelled owns the state.
                 throw e
             } catch (e: SshTransportException) {
+                logEntry(
+                    sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.FAILED,
+                    detail = e.userFacingMessage()
+                )
                 closeLiveSession()
                 _uiState.update {
                     it.copy(
@@ -385,6 +438,10 @@ class SessionViewModel(
                     )
                 }
             } catch (e: Exception) {
+                logEntry(
+                    sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.FAILED,
+                    detail = "Connection failed."
+                )
                 // Generic only — repository/transport messages are
                 // already secret-free, but this is the second net.
                 // Review #2 F-05: a failure AFTER authentication
@@ -436,6 +493,13 @@ class SessionViewModel(
     }
 
     fun disconnect() {
+        if (_uiState.value.status == SessionStatus.CONNECTED && sessionStartedAt > 0L) {
+            logEntry(
+                sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.CLOSED,
+                durationMs = System.currentTimeMillis() - sessionStartedAt
+            )
+            sessionStartedAt = 0L
+        }
         connectJob?.cancel()
         stopSequence()
         buttonsJob?.cancel()
@@ -662,12 +726,14 @@ class SessionViewModel(
 class SessionViewModelFactory(
     private val repository: HostRepository,
     private val commandRepository: CommandRepository,
-    private val environmentRepository: HostEnvironmentRepository
+    private val environmentRepository: HostEnvironmentRepository,
+    private val appSettings: com.pishi.termbridge.settings.AppSettingsStore? = null,
+    private val connectionLog: com.pishi.termbridge.settings.ConnectionLogStore? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SessionViewModel::class.java)) {
-            return SessionViewModel(repository, commandRepository, environmentRepository) as T
+            return SessionViewModel(repository, commandRepository, environmentRepository, appSettings, connectionLog) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

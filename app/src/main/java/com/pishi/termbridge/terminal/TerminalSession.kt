@@ -42,9 +42,13 @@ import net.schmizz.sshj.connection.channel.direct.Session
 class TerminalSession(
     private val connection: SshjConnection,
     initialCols: Int,
-    initialRows: Int
+    initialRows: Int,
+    /** TERM requested for the remote PTY (a user setting). */
+    private val terminalType: String = "xterm-256color",
+    /** Lines kept above the visible screen (a user setting). */
+    scrollbackLines: Int = 1000
 ) {
-    private val parser = VtParser(initialCols, initialRows)
+    private val parser = VtParser(initialCols, initialRows, scrollbackLines)
 
     /** Review #2 F-10: the parser is mutated by the reader thread
      *  (feed) and by the UI (resize) and read for snapshots; it is
@@ -111,7 +115,7 @@ class TerminalSession(
             val sess = connection.sshClient.startSession()
             session = sess
             sess.allocatePTY(
-                "xterm-256color",
+                terminalType,
                 parser.cols,
                 parser.rows,
                 0,

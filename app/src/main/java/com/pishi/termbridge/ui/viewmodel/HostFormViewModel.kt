@@ -71,6 +71,15 @@ class HostFormViewModel(
         }
     }
 
+    /** Pre-fill from quick connect / discovery. Only touches empty new-host fields. */
+    fun applyPrefill(host: String, port: Int, user: String?) {
+        if (hostId != null) return
+        if (hostname.isBlank()) hostname = host
+        if (name.isBlank()) name = host
+        portText = port.toString()
+        if (!user.isNullOrBlank() && username.isBlank()) username = user
+    }
+
     fun save() {
         val port = portText.toIntOrNull()
         val profile = HostProfile(

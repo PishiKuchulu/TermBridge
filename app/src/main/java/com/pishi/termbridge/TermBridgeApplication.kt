@@ -16,6 +16,9 @@ import com.pishi.termbridge.data.TermBridgeDatabase
 import com.pishi.termbridge.data.TransactionRunner
 import com.pishi.termbridge.security.AndroidKeystoreSecretCrypto
 import com.pishi.termbridge.security.SshCryptoProvider
+import com.pishi.termbridge.settings.AppLockStore
+import com.pishi.termbridge.settings.AppSettingsStore
+import com.pishi.termbridge.settings.ConnectionLogStore
 
 /**
  * Manual dependency container (prompt 02 decision: no DI framework
@@ -37,6 +40,10 @@ class TermBridgeApplication : Application() {
         super.onCreate()
         SshCryptoProvider.install()
     }
+
+    val appSettings: AppSettingsStore by lazy { AppSettingsStore(this) }
+    val connectionLog: ConnectionLogStore by lazy { ConnectionLogStore(this) }
+    val appLock: AppLockStore by lazy { AppLockStore(this) }
 
     /** One shared instance: the Keystore key-creation lock is
      *  process-wide, but a single instance keeps the intent obvious

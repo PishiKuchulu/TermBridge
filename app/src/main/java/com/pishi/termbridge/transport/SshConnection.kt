@@ -34,6 +34,8 @@ data class SshConnectionRequest(
     val passphrase: CharArray? = null,
     val connectTimeoutMs: Int = 15_000,
     val socketTimeoutMs: Int = 30_000,
+    /** SSH keep-alive interval in seconds; 0 = off (a user setting). */
+    val keepAliveSeconds: Int = 0,
     /** Prompt 10: SOCKS proxy for the initial TCP connection, or
      *  NONE. A proxy is never applied per jump hop — hops ride the
      *  established tunnel. */

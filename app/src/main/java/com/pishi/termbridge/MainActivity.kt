@@ -1,43 +1,126 @@
 package com.pishi.termbridge
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.fragment.app.FragmentActivity
+import com.pishi.termbridge.settings.UnlockResult
+import com.pishi.termbridge.ui.BiometricHelper
+import com.pishi.termbridge.ui.LockSettingsUi
 import com.pishi.termbridge.ui.navigation.TermBridgeApp
+import com.pishi.termbridge.ui.screens.LockScreen
 import com.pishi.termbridge.ui.theme.TermBridgeTheme
 
 /**
- * Entry point, now hosting the prompt-03 navigation shell. The shell
- * is honest by construction: every unimplemented destination carries
- * its "navigation shell only" banner until its feature prompt lands.
+ * Single activity. It extends FragmentActivity (a ComponentActivity
+ * subclass) only because BiometricPrompt needs one.
  *
- * Security fix 16 (M1): FLAG_SECURE is set on this window, so
- * terminal content — hostnames, usernames, command output,
- * potentially secrets printed by the server — cannot appear in
- * the Recents overview or in screenshots/screen recordings.
- * Scope, stated honestly: this is the app's only activity, so
- * the flag covers the whole app, not just the terminal screen —
- * the user cannot screenshot host lists or settings either.
- * That tradeoff is disclosed in the Settings screen note.
+ * Screenshots: FLAG_SECURE follows the "block screenshots" setting
+ * (default on) and covers the whole app, because this is the app's
+ * only activity.
+ *
+ * App lock: when a PIN is set, a full-screen overlay hides the app on
+ * a cold start and after the app has been in the background for more
+ * than [LOCK_GRACE_MS]. The grace period keeps the system file picker
+ * (a separate activity) from re-locking the app on every return.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    private var locked by mutableStateOf(false)
+    private var stoppedAt = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         val app = application as TermBridgeApplication
+        locked = app.appLock.enabled.value
+        // Apply the stored choice before the first frame (no window in
+        // which a protected screen is briefly capturable).
+        if (app.appSettings.settings.value.blockScreenshots) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         setContent {
+            val prefs by app.appSettings.settings.collectAsState()
+            LaunchedEffect(prefs.blockScreenshots) {
+                if (prefs.blockScreenshots) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+            val lockEnabled by app.appLock.enabled.collectAsState()
+            val biometricOn by app.appLock.biometric.collectAsState()
+            val biometricAvailable = remember { BiometricHelper.isAvailable(this@MainActivity) }
+            val lockSettings = LockSettingsUi(
+                enabled = lockEnabled,
+                biometricOn = biometricOn,
+                biometricAvailable = biometricAvailable,
+                setPin = { pin -> app.appLock.setPin(pin) },
+                disable = { pin ->
+                    if (app.appLock.verify(pin) == UnlockResult.Success) {
+                        app.appLock.disable()
+                        true
+                    } else {
+                        false
+                    }
+                },
+                setBiometric = { on -> app.appLock.setBiometric(on) }
+            )
+            val promptTitle = getString(R.string.lock_biometric_title)
+            val promptCancel = getString(R.string.action_cancel)
             TermBridgeTheme {
-                TermBridgeApp(
-                    repository = app.hostRepository,
-                    commandRepository = app.commandRepository,
-                    environmentRepository = app.environmentRepository,
-                    advancedRepository = app.advancedRepository,
-                    backupService = app.backupService
-                )
+                Box {
+                    TermBridgeApp(
+                        repository = app.hostRepository,
+                        commandRepository = app.commandRepository,
+                        environmentRepository = app.environmentRepository,
+                        advancedRepository = app.advancedRepository,
+                        backupService = app.backupService,
+                        appSettings = app.appSettings,
+                        connectionLog = app.connectionLog,
+                        lockSettings = lockSettings
+                    )
+                    if (locked && lockEnabled) {
+                        LockScreen(
+                            store = app.appLock,
+                            biometricEnabled = biometricOn && biometricAvailable,
+                            onUnlocked = { locked = false },
+                            onBiometric = {
+                                BiometricHelper.prompt(
+                                    this@MainActivity, promptTitle, promptCancel
+                                ) { locked = false }
+                            }
+                        )
+                    }
+                }
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stoppedAt = SystemClock.elapsedRealtime()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val app = application as TermBridgeApplication
+        if (stoppedAt > 0L && app.appLock.enabled.value &&
+            SystemClock.elapsedRealtime() - stoppedAt > LOCK_GRACE_MS
+        ) {
+            locked = true
+        }
+    }
+
+    private companion object {
+        const val LOCK_GRACE_MS = 30_000L
     }
 }

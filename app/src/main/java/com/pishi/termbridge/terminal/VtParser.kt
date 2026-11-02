@@ -18,7 +18,9 @@ data class TerminalSnapshot(
     val lines: List<List<TerminalCell>>,
     val cursorRow: Int,
     val cursorCol: Int,
-    val scrollbackCount: Int
+    val scrollbackCount: Int,
+    /** Number of BEL characters received so far (for a haptic tick). */
+    val bellCount: Int = 0
 )
 
 private enum class ParserState {
@@ -101,6 +103,7 @@ class VtParser(
 
     private var state = ParserState.GROUND
     private var oscSawEsc = false
+    private var bellCount = 0
     private val csiParams = StringBuilder()
     private var csiPrivate = false
 
@@ -157,7 +160,8 @@ class VtParser(
             // literal 8 (operator precedence), so a tab near the right
             // edge moved the cursor past the last column and wrapped.
             '\t' -> cursorCol = (((cursorCol / 8) + 1) * 8).coerceAtMost(cols - 1)
-            '\u0007', '\u0000' -> Unit // Bell and NUL: ignored.
+            '\u0007' -> bellCount += 1
+            '\u0000' -> Unit // NUL: ignored.
             else -> {
                 if (ch.code >= 0x20 && ch.code != 0x7F) {
                     putChar(ch)
@@ -448,7 +452,8 @@ class VtParser(
             lines = lines,
             cursorRow = scrollback.size + cursorRow,
             cursorCol = cursorCol,
-            scrollbackCount = scrollback.size
+            scrollbackCount = scrollback.size,
+            bellCount = bellCount
         )
     }
 }
