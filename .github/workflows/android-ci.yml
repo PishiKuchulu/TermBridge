@@ -85,7 +85,9 @@ jobs:
           git add . && git commit -qm "test errors run $GITHUB_RUN_NUMBER"
           git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs-tests
 
-      # Replaces the previous rolling pre-release with this build.
+      # Replaces the previous rolling release with this build. It is NOT a
+      # pre-release: GitHub hides pre-releases from the repository sidebar,
+      # which made the APK look missing.
       # Runs only when the unit tests passed, on pushes to main.
       - name: Publish debug APK as the latest pre-release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -95,9 +97,9 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk TermBridge-debug.apk
           gh release delete debug-latest --cleanup-tag --yes || true
           gh release create debug-latest TermBridge-debug.apk \
-            --prerelease \
+            --latest \
             --target "$GITHUB_SHA" \
-            --title "TermBridge debug build" \
+            --title "TermBridge debug build (latest)" \
             --notes "Debug-signed APK built by CI from commit $GITHUB_SHA. Not a release build."
 
       # Prompt 15: machine-readable test output even on failure,
