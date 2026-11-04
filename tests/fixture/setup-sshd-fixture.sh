@@ -83,6 +83,15 @@ sudo usermod -p '*' "$FIXTURE_KEY_USER"
 
 sudo mkdir -p "$FIXTURE_DIR" /run/sshd
 sudo chmod 755 "$FIXTURE_DIR"
+# The directory must belong to the invoking user, not root:
+# later steps launch the echo/SOCKS services WITHOUT sudo and
+# write their $svc.log / $svc.pid files into this directory.
+# With a root-owned directory those unprivileged redirects
+# fail with Permission denied — the exact failure that killed
+# CI run #64's instrumented job (echo.log / echo.pid).
+# sshd itself runs as root, so it reads its keys, configs and
+# authorized_keys files here regardless of who owns the dir.
+sudo chown "$(id -un)" "$FIXTURE_DIR"
 
 if [ ! -f "$FIXTURE_DIR/ssh_host_ed25519_key" ]; then
     sudo ssh-keygen -t ed25519 -f "$FIXTURE_DIR/ssh_host_ed25519_key" -N "" -q
