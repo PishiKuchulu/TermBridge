@@ -176,6 +176,17 @@ class SessionViewModel(
         }
     }
 
+    /** Live user preferences (font size, scrollback, keep-alive...). */
+    // MUST stay above the init block below: viewModelScope runs on
+    // Dispatchers.Main.immediate, so the init block's launched
+    // coroutine can start INLINE during construction (before any
+    // property declared after it has been initialized). When this
+    // val sat below init, the first history emission reached
+    // autocompleteOn() while this field was still null and crashed
+    // the app on launch (CI run #65, MainActivitySmokeTest).
+    val settings: StateFlow<com.pishi.termbridge.domain.AppSettings> =
+        appSettings?.settings ?: MutableStateFlow(com.pishi.termbridge.domain.AppSettings())
+
     init {
         // Imported/recorded history refreshes open suggestions.
         val store = commandHistoryStore
@@ -273,10 +284,6 @@ class SessionViewModel(
     fun setFontSize(sp: Int) {
         appSettings?.update { it.copy(terminalFontSp = sp) }
     }
-
-    /** Live user preferences (font size, scrollback, keep-alive...). */
-    val settings: StateFlow<com.pishi.termbridge.domain.AppSettings> =
-        appSettings?.settings ?: MutableStateFlow(com.pishi.termbridge.domain.AppSettings())
 
     private val transport = SshTransport(repository)
 
