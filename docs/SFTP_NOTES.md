@@ -78,3 +78,22 @@ SFTP-capable SSH server are in this category.
 - Files opens its OWN SSH connection, separate from the
   terminal's. Unifying connections is a prompt-15 integration
   decision, documented in FilesViewModel.
+
+## Note, 2026-11-04 — item T-21 (queue, folders, resume)
+
+Transfers now run through a one-at-a-time queue in
+FilesViewModel. Resume design: a download interrupted by
+cancel or an IO failure keeps its partial destination file
+and resumes with an append-mode stream plus sshj's
+offset input stream — progress and the size check stay
+total-based, so a resumed download is verified exactly
+like a fresh one. An upload cancelled in the single-file
+flow keeps its temporary file on the server; resume first
+re-stats the temp and trusts it only when its size equals
+the recorded offset, then writes the remainder at that
+offset — the pre-existing whole-file size verification
+before the rename still runs, so a bad resume fails
+instead of corrupting. Resume state lives only for the
+screen's ViewModel session; leaving Files drops it (a
+stranded upload temp is a hidden dot-file next to its
+target, one per cancelled upload at most).

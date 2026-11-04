@@ -6,6 +6,11 @@ import com.pishi.termbridge.data.MIGRATION_1_2
 import com.pishi.termbridge.data.MIGRATION_2_3
 import com.pishi.termbridge.data.MIGRATION_3_4
 import com.pishi.termbridge.data.MIGRATION_4_5
+import com.pishi.termbridge.data.MIGRATION_5_6
+import com.pishi.termbridge.data.MIGRATION_6_7
+import com.pishi.termbridge.data.MIGRATION_7_8
+import com.pishi.termbridge.data.MIGRATION_8_9
+import com.pishi.termbridge.data.MIGRATION_9_10
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -230,6 +235,114 @@ class MigrationSqlAuditTest {
                     "0"
                 )
             )
+        ),
+        ExpectedMigration(
+            MIGRATION_5_6, 5, 6,
+            tables = listOf(
+                TableDef(
+                    "keychain_entries",
+                    listOf(
+                        pkId(), col("label", "TEXT"), col("kind", "TEXT"),
+                        col("materialBlob", "BLOB"),
+                        col("publicKeyText", "TEXT", notNull = false),
+                        col("fingerprint", "TEXT", notNull = false),
+                        col("createdAt", "INTEGER"), col("updatedAt", "INTEGER")
+                    ),
+                    emptyList(),
+                    emptyList()
+                )
+            ),
+            indices = listOf(
+                IndexDef(
+                    "index_keychain_entries_label", "keychain_entries",
+                    listOf("label"), true
+                )
+            ),
+            alters = listOf(
+                // Item T-01: existing hosts keep the inline
+                // credential path — NULL means "no keychain
+                // reference", so the column carries no DEFAULT.
+                AlterDef(
+                    "hosts",
+                    col("keychainEntryId", "INTEGER", notNull = false),
+                    null
+                )
+            )
+        ),
+        ExpectedMigration(
+            MIGRATION_6_7, 6, 7,
+            tables = listOf(
+                TableDef(
+                    "snippets",
+                    listOf(
+                        pkId(), col("label", "TEXT"), col("category", "TEXT"),
+                        col("sortOrder", "INTEGER"), col("mode", "TEXT"),
+                        col("template", "TEXT"), col("createdAt", "INTEGER"),
+                        col("updatedAt", "INTEGER")
+                    ),
+                    emptyList(),
+                    emptyList()
+                ),
+                TableDef(
+                    "snippet_steps",
+                    listOf(
+                        pkId(), col("snippetId", "INTEGER"),
+                        col("sortOrder", "INTEGER"), col("template", "TEXT")
+                    ),
+                    emptyList(),
+                    listOf(ForeignKeyDef("snippetId", "snippets", "id", true))
+                ),
+                TableDef(
+                    "snippet_variables",
+                    listOf(
+                        pkId(), col("snippetId", "INTEGER"), col("name", "TEXT"),
+                        col("defaultValue", "TEXT"), col("required", "INTEGER")
+                    ),
+                    emptyList(),
+                    listOf(ForeignKeyDef("snippetId", "snippets", "id", true))
+                )
+            ),
+            indices = listOf(
+                IndexDef("index_snippet_steps_snippetId", "snippet_steps", listOf("snippetId"), false),
+                IndexDef("index_snippet_variables_snippetId", "snippet_variables", listOf("snippetId"), false)
+            )
+        ),
+        ExpectedMigration(
+            MIGRATION_7_8, 7, 8,
+            tables = emptyList(),
+            indices = emptyList(),
+            alters = listOf(
+                // Item T-22: organization columns. Existing rows
+                // start unfavorited and ungrouped; lastConnectedAt
+                // is NULL = never connected, so no DEFAULT.
+                AlterDef("hosts", col("favorite", "INTEGER"), "0"),
+                AlterDef("hosts", col("groupName", "TEXT"), "''"),
+                AlterDef(
+                    "hosts",
+                    col("lastConnectedAt", "INTEGER", notNull = false),
+                    null
+                )
+            )
+        ),
+        ExpectedMigration(
+            MIGRATION_8_9, 8, 9,
+            tables = emptyList(),
+            indices = emptyList(),
+            alters = listOf(
+                // Item F-02: the export-fallback opt-in starts
+                // off for every existing host.
+                AlterDef("host_settings", col("envExportFallback", "INTEGER"), "0")
+            )
+        ),
+        ExpectedMigration(
+            MIGRATION_9_10, 9, 10,
+            tables = emptyList(),
+            indices = emptyList(),
+            alters = listOf(
+                // Item T-03: the transcript opt-ins start off.
+                AlterDef("host_settings", col("sessionLogEnabled", "INTEGER"), "0"),
+                AlterDef("host_settings", col("sessionLogInBackup", "INTEGER"), "0")
+            )
         )
     )
 
@@ -334,7 +447,7 @@ class MigrationSqlAuditTest {
             assertEquals(e.fromVersion, e.migration.startVersion)
             assertEquals(e.toVersion, e.migration.endVersion)
         }
-        // 1 -> 2 -> 3 -> 4 -> 5, no missing step.
+        // 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10, no missing step.
         for (i in 1 until expected.size) {
             assertEquals(expected[i - 1].toVersion, expected[i].fromVersion)
         }
@@ -424,14 +537,22 @@ class MigrationSqlAuditTest {
                 .filter { it.trimStart().startsWith("ALTER", ignoreCase = true) }
                 .map { parseAlterAddColumn(it) }
             ) {
-                columns.getValue(alter.table) += alter.column
+                // An ALTER may target a v1 base table (hosts in
+                // 5->6) that no migration creates; seed it empty
+                // instead of assuming every altered table was
+                // created by an earlier migration.
+                columns.getOrPut(alter.table) { mutableListOf() } += alter.column
             }
         }
         assertEquals(
             "Final host_settings columns",
             setOf(
                 "hostId", "remoteWorkingDirectory", "localDirectoryUri",
-                "remoteShell", "shellConfirmed"
+                "remoteShell", "shellConfirmed",
+                // Item F-02 (8->9): the export-fallback opt-in.
+                "envExportFallback",
+                // Item T-03 (9->10): the transcript opt-ins.
+                "sessionLogEnabled", "sessionLogInBackup"
             ),
             columns.getValue("host_settings").map { it.name }.toSet()
         )
@@ -518,7 +639,7 @@ class MigrationSqlAuditTest {
                 }
             }
         }
-        // Final schema: v1 base (2) + v2 (3) + v3 (2) + v4 (3).
-        assertEquals(10, knownTables.size)
+        // Final schema: v1 base (2) + v2 (3) + v3 (2) + v4 (3) + v6 (1) + v7 (3).
+        assertEquals(14, knownTables.size)
     }
 }

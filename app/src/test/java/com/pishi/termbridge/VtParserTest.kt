@@ -17,6 +17,23 @@ class VtParserTest {
     }
 
     @Test
+    fun clearScreenAndScrollbackBlanksEverything() {
+        // Item T-19: the local clear drops scrollback + screen
+        // and homes the cursor; later output starts at the top.
+        val parser = VtParser(10, 2, maxScrollback = 10)
+        parser.feed("one\r\ntwo\r\nthree\r\nfour")
+        assertTrue(parser.snapshot().scrollbackCount > 0)
+        parser.clearScreenAndScrollback()
+        val cleared = parser.snapshot()
+        assertEquals(0, cleared.scrollbackCount)
+        assertEquals(0, cleared.cursorRow)
+        assertEquals(0, cleared.cursorCol)
+        assertTrue(cleared.lines.all { it.asText().isEmpty() })
+        parser.feed("new")
+        assertEquals("new", parser.snapshot().lines[0].asText())
+    }
+
+    @Test
     fun backspaceAndTab() {
         val parser = VtParser(80, 24)
         parser.feed("abc\bX")
@@ -165,6 +182,73 @@ class VtParserTest {
         parser.resize(5, 2)
         assertEquals("01234", parser.snapshot().lines[0].asText())
         assertEquals(5, parser.cols)
+    }
+
+    // Item T-12: DECSCUSR + cursor visibility.
+    private val esc: Char = 27.toChar()
+
+    @Test
+    fun decscusrSetsShapeAndBlink() {
+        val parser = VtParser(80, 24)
+        parser.feed("$esc[5 q")
+        var snapshot = parser.snapshot()
+        assertEquals(
+            com.pishi.termbridge.terminal.CursorShape.BAR, snapshot.cursorShape
+        )
+        assertTrue(snapshot.cursorBlinking)
+        assertTrue(snapshot.cursorStyleSetByApp)
+        parser.feed("$esc[4 q")
+        snapshot = parser.snapshot()
+        assertEquals(
+            com.pishi.termbridge.terminal.CursorShape.UNDERLINE, snapshot.cursorShape
+        )
+        assertTrue(!snapshot.cursorBlinking)
+        parser.feed("$esc[2 q")
+        snapshot = parser.snapshot()
+        assertEquals(
+            com.pishi.termbridge.terminal.CursorShape.BLOCK, snapshot.cursorShape
+        )
+        assertTrue(!snapshot.cursorBlinking)
+    }
+
+    @Test
+    fun decscusrDoesNotPrintTheFinalQ() {
+        val parser = VtParser(80, 24)
+        parser.feed("$esc[6 q")
+        assertEquals("", parser.snapshot().lines[0].asText())
+    }
+
+    @Test
+    fun decscusrUnknownNumberKeepsCurrentStyle() {
+        val parser = VtParser(80, 24)
+        parser.feed("$esc[5 q")
+        parser.feed("$esc[9 q")
+        assertEquals(
+            com.pishi.termbridge.terminal.CursorShape.BAR,
+            parser.snapshot().cursorShape
+        )
+    }
+
+    @Test
+    fun cursorVisibilityPrivateMode() {
+        val parser = VtParser(80, 24)
+        assertTrue(parser.snapshot().cursorVisible)
+        parser.feed("$esc[?25l")
+        assertTrue(!parser.snapshot().cursorVisible)
+        parser.feed("$esc[?25h")
+        assertTrue(parser.snapshot().cursorVisible)
+    }
+
+    @Test
+    fun fullResetClearsCursorStyle() {
+        val parser = VtParser(80, 24)
+        parser.feed("$esc[5 q")
+        parser.feed("${esc}c")
+        val snapshot = parser.snapshot()
+        assertTrue(!snapshot.cursorStyleSetByApp)
+        assertEquals(
+            com.pishi.termbridge.terminal.CursorShape.BLOCK, snapshot.cursorShape
+        )
     }
 
     @Test

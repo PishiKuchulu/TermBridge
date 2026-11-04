@@ -8,6 +8,8 @@ import com.pishi.termbridge.domain.CommandMode
 import com.pishi.termbridge.domain.ExportButton
 import com.pishi.termbridge.domain.ExportCredential
 import com.pishi.termbridge.domain.ExportHost
+import com.pishi.termbridge.domain.ExportKeychainEntry
+import com.pishi.termbridge.domain.ExportVariable
 import com.pishi.termbridge.domain.RemoteShell
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -250,6 +252,236 @@ class BackupCodecTest {
             fail("Expected BackupException")
         } catch (e: BackupException) {
             assertTrue(e.message!!.contains("passphrase"))
+        }
+    }
+
+    private fun keychainEntry(
+        label: String = "Prod password",
+        material: ExportCredential? = null
+    ) = ExportKeychainEntry(
+        label = label,
+        kind = AuthType.PASSWORD,
+        material = material,
+        hasMaterial = true,
+        publicKeyText = null,
+        fingerprint = null
+    )
+
+    @Test
+    fun keychainEncryptedRoundTrip() {
+        val document = BackupDocument(
+            hosts = listOf(host(hasCredential = true).copy(keychainLabel = "Prod password")),
+            keychain = listOf(
+                keychainEntry(material = ExportCredential(AuthType.PASSWORD, "shared-secret"))
+            )
+        )
+        val text = BackupCodec.encodeEnvelope(
+            document, true, "correct-horse-battery".toCharArray()
+        )
+        val decoded = BackupCodec.decodeEnvelope(text, "correct-horse-battery".toCharArray())
+        assertTrue(decoded.hasCredentials)
+        val entry = decoded.document.keychain.single()
+        assertEquals("shared-secret", entry.material?.value)
+        assertEquals("Prod password", decoded.document.hosts.single().keychainLabel)
+        assertTrue(decoded.warnings.isEmpty())
+    }
+
+    @Test
+    fun transcriptEncryptedRoundTrip() {
+        val document = BackupDocument(
+            hosts = listOf(host(hasCredential = true)),
+            transcripts = listOf(
+                com.pishi.termbridge.domain.ExportTranscript(
+                    "Home server", "line one\nline two\n"
+                )
+            )
+        )
+        val text = BackupCodec.encodeEnvelope(
+            document, true, "correct-horse-battery".toCharArray()
+        )
+        val decoded = BackupCodec.decodeEnvelope(
+            text, "correct-horse-battery".toCharArray()
+        )
+        val transcript = decoded.document.transcripts.single()
+        assertEquals("Home server", transcript.hostLabel)
+        assertEquals("line one\nline two\n", transcript.text)
+    }
+
+    @Test
+    fun transcriptInPlainFileFails() {
+        val document = BackupDocument(
+            hosts = listOf(host(hasCredential = true)),
+            transcripts = listOf(
+                com.pishi.termbridge.domain.ExportTranscript("Home server", "x")
+            )
+        )
+        try {
+            BackupCodec.decodeEnvelope(plainText(document), null)
+            fail("A transcript in a plain backup must be rejected")
+        } catch (_: BackupException) {
+            // Expected.
+        }
+    }
+
+    @Test
+    fun keychainPlainMetadataRoundTrip() {
+        val document = BackupDocument(
+            hosts = listOf(host(hasCredential = true).copy(keychainLabel = "Prod password")),
+            keychain = listOf(keychainEntry())
+        )
+        val decoded = BackupCodec.decodeEnvelope(plainText(document), null)
+        assertFalse(decoded.hasCredentials)
+        assertEquals(1, decoded.document.keychain.size)
+        assertEquals("Prod password", decoded.document.hosts.single().keychainLabel)
+    }
+
+    @Test
+    fun snippetsRoundTripPlainAndEncrypted() {
+        // Item T-02: global snippets keep their full shape —
+        // steps and variables included — through both modes.
+        val snippet = ExportButton(
+            label = "Deploy",
+            category = "ops",
+            sortOrder = 3,
+            mode = CommandMode.SEQUENCE,
+            template = "",
+            steps = listOf("git pull", "systemctl restart {{unit}}"),
+            variables = listOf(
+                ExportVariable(name = "unit", defaultValue = "app", required = true)
+            )
+        )
+        val document = BackupDocument(
+            hosts = listOf(host()),
+            snippets = listOf(snippet)
+        )
+        val plain = BackupCodec.decodeEnvelope(plainText(document), null)
+        assertEquals(listOf(snippet), plain.document.snippets)
+        val encryptedText = BackupCodec.encodeEnvelope(
+            document, true, "correct-horse-battery".toCharArray()
+        )
+        val encrypted = BackupCodec.decodeEnvelope(
+            encryptedText, "correct-horse-battery".toCharArray()
+        )
+        assertEquals(listOf(snippet), encrypted.document.snippets)
+    }
+
+    @Test
+    fun favoriteAndGroupRoundTrip() {
+        // Item T-22: organization fields are configuration and
+        // ride in both export modes; old files without them are
+        // covered by oldFileWithoutKeychainSectionDecodes (the
+        // fields are optional on decode).
+        val document = BackupDocument(
+            listOf(host().copy(favorite = true, groupName = "Work"))
+        )
+        val plain = BackupCodec.decodeEnvelope(plainText(document), null)
+        assertTrue(plain.document.hosts.single().favorite)
+        assertEquals("Work", plain.document.hosts.single().groupName)
+        val encryptedText = BackupCodec.encodeEnvelope(
+            document, true, "correct-horse-battery".toCharArray()
+        )
+        val encrypted = BackupCodec.decodeEnvelope(
+            encryptedText, "correct-horse-battery".toCharArray()
+        )
+        assertTrue(encrypted.document.hosts.single().favorite)
+        assertEquals("Work", encrypted.document.hosts.single().groupName)
+    }
+
+    @Test
+    fun keychainMaterialInPlainFileFails() {
+        val document = BackupDocument(
+            hosts = emptyList(),
+            keychain = listOf(
+                keychainEntry(material = ExportCredential(AuthType.PASSWORD, "shared-secret"))
+            )
+        )
+        try {
+            BackupCodec.decodeEnvelope(plainText(document), null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("must not contain keychain material"))
+        }
+    }
+
+    @Test
+    fun oldFileWithoutKeychainSectionDecodes() {
+        // A v1 payload written before item T-01: no "keychain"
+        // section and no per-host "keychainLabel" field at all.
+        val payload = buildJsonObject {
+            put("hosts", buildJsonArray {
+                add(buildJsonObject {
+                    put("exportId", JsonPrimitive(0))
+                    put("name", JsonPrimitive("Old host"))
+                    put("hostname", JsonPrimitive("192.0.2.5"))
+                    put("port", JsonPrimitive(22))
+                    put("username", JsonPrimitive("root"))
+                    put("authType", JsonPrimitive("PASSWORD"))
+                    put("notes", JsonPrimitive(""))
+                    put("tags", JsonPrimitive(""))
+                    put("credential", kotlinx.serialization.json.JsonNull)
+                    put("hasCredential", JsonPrimitive(false))
+                    put("buttons", buildJsonArray {})
+                    put("settings", kotlinx.serialization.json.JsonNull)
+                    put("envVars", buildJsonArray {})
+                    put("tunnels", buildJsonArray {})
+                    put("proxy", kotlinx.serialization.json.JsonNull)
+                    put("jumpHopExportIds", buildJsonArray {})
+                })
+            })
+        }
+        val envelope = buildJsonObject {
+            put("format", JsonPrimitive("termbridge-backup"))
+            put("version", JsonPrimitive(1))
+            put("encrypted", JsonPrimitive(false))
+            put("payload", payload)
+        }
+        val decoded = BackupCodec.decodeEnvelope(envelope.toString(), null)
+        assertEquals("Old host", decoded.document.hosts.single().name)
+        assertTrue(decoded.document.keychain.isEmpty())
+        assertEquals(null, decoded.document.hosts.single().keychainLabel)
+    }
+
+    @Test
+    fun unknownKeychainLabelDropsLinkWithWarning() {
+        val document = BackupDocument(
+            hosts = listOf(host(hasCredential = true).copy(keychainLabel = "Ghost")),
+            keychain = emptyList()
+        )
+        val decoded = BackupCodec.decodeEnvelope(plainText(document), null)
+        assertEquals(null, decoded.document.hosts.single().keychainLabel)
+        assertTrue(decoded.warnings.any { it.contains("not in this backup") })
+    }
+
+    @Test
+    fun kindMismatchedKeychainLinkDropsWithWarning() {
+        val keyEntry = ExportKeychainEntry(
+            label = "A key",
+            kind = AuthType.PRIVATE_KEY,
+            material = null,
+            hasMaterial = true,
+            publicKeyText = null,
+            fingerprint = null
+        )
+        val document = BackupDocument(
+            hosts = listOf(host(hasCredential = true).copy(keychainLabel = "A key")),
+            keychain = listOf(keyEntry)
+        )
+        val decoded = BackupCodec.decodeEnvelope(plainText(document), null)
+        assertEquals(null, decoded.document.hosts.single().keychainLabel)
+        assertTrue(decoded.warnings.any { it.contains("does not match") })
+    }
+
+    @Test
+    fun duplicateKeychainLabelsFail() {
+        val document = BackupDocument(
+            hosts = emptyList(),
+            keychain = listOf(keychainEntry(), keychainEntry())
+        )
+        try {
+            BackupCodec.decodeEnvelope(plainText(document), null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("labels must be unique"))
         }
     }
 

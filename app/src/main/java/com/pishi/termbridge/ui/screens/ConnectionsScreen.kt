@@ -43,15 +43,19 @@ import java.util.Date
 /**
  * Entry point for starting a connection: a quick-connect line that
  * understands `ssh user@host -p 2222`, plus every way to reach a
- * server. Quick connect only PRE-FILLS the add-host form (credentials
- * are never typed into a free-text line), so nothing is dialled until
- * the user saves the host and taps Connect.
+ * server. Quick connect (item T-04) dials directly WITHOUT saving
+ * the host; the credential is asked in its own field below the
+ * line — never inside the free-text line itself. "Save as a host
+ * instead" keeps the old pre-fill path for a permanent entry.
  */
 @Composable
 fun ConnectionsScreen(
     recent: List<ConnectionLogEntry>,
     liveSession: Boolean,
-    onQuickConnect: (QuickConnectTarget) -> Unit,
+    onQuickConnectPassword: (QuickConnectTarget, String, CharArray) -> Unit,
+    onQuickConnectKeychain: (QuickConnectTarget, String, Long, String) -> Unit,
+    onSaveAsHost: (QuickConnectTarget) -> Unit,
+    keychainEntries: List<com.pishi.termbridge.domain.KeychainEntry> = emptyList(),
     onAddHost: () -> Unit,
     onSftp: () -> Unit,
     onDiscover: () -> Unit,
@@ -61,13 +65,21 @@ fun ConnectionsScreen(
 ) {
     var line by remember { mutableStateOf("") }
     var invalid by remember { mutableStateOf(false) }
+    var parsed by remember { mutableStateOf<QuickConnectTarget?>(null) }
+    var username by remember { mutableStateOf("") }
+    var useKeychain by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf("") }
+    var keyPassphrase by remember { mutableStateOf("") }
+    var selectedEntryId by remember { mutableStateOf<Long?>(null) }
     val submit: () -> Unit = {
         val target = QuickConnect.parse(line)
         if (target == null) {
             invalid = true
         } else {
             invalid = false
-            onQuickConnect(target)
+            parsed = target
+            username = target.username ?: ""
+            selectedEntryId = keychainEntries.firstOrNull()?.id
         }
     }
     Column(
@@ -107,6 +119,110 @@ fun ConnectionsScreen(
             onClick = { submit() },
             modifier = Modifier.fillMaxWidth()
         )
+        val target = parsed
+        if (target != null) {
+            Text(
+                text = stringResource(
+                    R.string.connections_quick_target,
+                    target.host, target.port
+                ),
+                style = MaterialTheme.typography.titleMedium
+            )
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                singleLine = true,
+                label = { Text(stringResource(R.string.field_username)) },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (keychainEntries.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.RadioButton(
+                        selected = !useKeychain,
+                        onClick = { useKeychain = false }
+                    )
+                    Text(stringResource(R.string.auth_password))
+                    androidx.compose.material3.RadioButton(
+                        selected = useKeychain,
+                        onClick = { useKeychain = true }
+                    )
+                    Text(stringResource(R.string.keychain_title))
+                }
+            }
+            if (!useKeychain) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.auth_password)) },
+                    visualTransformation =
+                        androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        keyboardType = KeyboardType.Password
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                for (entry in keychainEntries) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(
+                            selected = selectedEntryId == entry.id,
+                            onClick = { selectedEntryId = entry.id }
+                        )
+                        Text(entry.label)
+                    }
+                }
+                val selected = keychainEntries.firstOrNull { it.id == selectedEntryId }
+                if (selected?.kind == com.pishi.termbridge.domain.AuthType.PRIVATE_KEY) {
+                    OutlinedTextField(
+                        value = keyPassphrase,
+                        onValueChange = { keyPassphrase = it },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.field_passphrase)) },
+                        visualTransformation =
+                            androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Password
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            PrimaryAction(
+                label = stringResource(R.string.session_connect),
+                enabled = username.isNotBlank() &&
+                    (if (useKeychain) selectedEntryId != null else password.isNotEmpty()),
+                onClick = {
+                    if (useKeychain) {
+                        selectedEntryId?.let { entryId ->
+                            onQuickConnectKeychain(target, username, entryId, keyPassphrase)
+                        }
+                    } else {
+                        onQuickConnectPassword(target, username, password.toCharArray())
+                    }
+                    password = ""
+                    keyPassphrase = ""
+                    parsed = null
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row {
+                androidx.compose.material3.TextButton(
+                    onClick = { onSaveAsHost(target) }
+                ) { Text(stringResource(R.string.connections_quick_save_as_host)) }
+                androidx.compose.material3.TextButton(
+                    onClick = { parsed = null }
+                ) { Text(stringResource(R.string.action_cancel)) }
+            }
+        }
 
         SectionLabel(stringResource(R.string.connections_ways_title))
         if (liveSession) {

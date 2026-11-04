@@ -29,6 +29,12 @@ const val MAX_BACKUP_BYTES = 5 * 1024 * 1024
 
 /** Per-document caps: above these, the whole file is rejected. */
 const val MAX_HOSTS_IN_BACKUP = 500
+const val MAX_KEYCHAIN_ENTRIES_IN_BACKUP = 500
+const val MAX_SNIPPETS_IN_BACKUP = 200
+/** Item T-03 caps: at most one transcript per host, and the
+ *  on-device cap is 256 KiB, so 400k chars is generous. */
+const val MAX_TRANSCRIPTS_IN_BACKUP = 200
+const val MAX_TRANSCRIPT_CHARS = 400_000
 const val MAX_BUTTONS_PER_HOST = 100
 const val MAX_ENV_VARS_PER_HOST = 100
 const val MAX_TUNNELS_PER_HOST = 100
@@ -99,6 +105,21 @@ data class ExportProxy(
     val proxyPort: Int
 )
 
+/** One exported keychain entry (item T-01). [material] rides
+ *  only inside an encrypted payload, exactly like a host
+ *  credential; a non-secret export carries the metadata
+ *  (label, kind, fingerprint, public key) and [hasMaterial]
+ *  says the entry exists without carrying its secret, so the
+ *  import can report that the entry itself was not restored. */
+data class ExportKeychainEntry(
+    val label: String,
+    val kind: AuthType,
+    val material: ExportCredential?,
+    val hasMaterial: Boolean,
+    val publicKeyText: String?,
+    val fingerprint: String?
+)
+
 /** One exported host. [exportId] is the file-local identity used
  *  by jump chains (which reference other hosts); it is NOT a
  *  database id and is never imported as one — import assigns
@@ -127,13 +148,47 @@ data class ExportHost(
     /** Null when the source host has no proxy (NONE). */
     val proxy: ExportProxy?,
     /** Jump hops, as exportIds of other hosts in this file. */
-    val jumpHopExportIds: List<Int>
+    val jumpHopExportIds: List<Int>,
+    /** Item T-01: label of the keychain entry this host's
+     *  credential resolves through, or null for an inline
+     *  credential. The entry's material, when carried at all,
+     *  rides in the document's keychain section — never
+     *  duplicated into the host's own credential field. */
+    val keychainLabel: String? = null,
+    /** Item T-22: list organization. Optional on decode (files
+     *  written before T-22 do not carry them). lastConnectedAt
+     *  is deliberately NOT exported: it is device-local
+     *  history, not configuration. */
+    val favorite: Boolean = false,
+    val groupName: String = ""
 )
 
 /** A decoded backup document: the payload of one file, after
  *  envelope validation and (for encrypted files) decryption. */
 data class BackupDocument(
-    val hosts: List<ExportHost>
+    val hosts: List<ExportHost>,
+    /** Keychain entries (item T-01). Absent in backups written
+     *  before the keychain existed; defaults to empty so old
+     *  files and old constructions keep working. */
+    val keychain: List<ExportKeychainEntry> = emptyList(),
+    /** Global snippets (item T-02): command buttons that belong
+     *  to no host. Same shape as a host's buttons; absent in
+     *  backups written before snippets existed. */
+    val snippets: List<ExportButton> = emptyList(),
+    /** Session transcripts (item T-03): present ONLY in
+     *  encrypted backups and ONLY for hosts that opted in
+     *  twice (recording on + include-in-backup on). Absent in
+     *  plain backups and in files written before T-03. */
+    val transcripts: List<ExportTranscript> = emptyList()
+)
+
+/** One host's session transcript (item T-03), keyed by the
+ *  host's display name as exported. The text was scrubbed
+ *  line by line when recorded; it is user data, restored to
+ *  the matching imported host. */
+data class ExportTranscript(
+    val hostLabel: String,
+    val text: String
 )
 
 /** One existing host that an imported host would collide with.
@@ -160,6 +215,9 @@ data class ImportPreview(
     val advisories: List<String> = emptyList()
 ) {
     val hostCount: Int get() = document.hosts.size
+    val keychainCount: Int get() = document.keychain.size
+    val snippetCount: Int get() = document.snippets.size
+    val transcriptCount: Int get() = document.transcripts.size
     val buttonCount: Int get() = document.hosts.sumOf { it.buttons.size }
     val tunnelCount: Int get() = document.hosts.sumOf { it.tunnels.size }
     val envVarCount: Int get() = document.hosts.sumOf { it.envVars.size }

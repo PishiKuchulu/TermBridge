@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -45,6 +46,7 @@ fun VaultScreen(
     onSnippets: () -> Unit,
     onKnownHosts: () -> Unit,
     onLogs: () -> Unit,
+    onKeychain: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -55,6 +57,7 @@ fun VaultScreen(
         verticalArrangement = Arrangement.spacedBy(Spacing.small)
     ) {
         NavCard(Icons.Filled.Storage, stringResource(R.string.vault_hosts), stringResource(R.string.vault_hosts_sub), onHosts)
+        NavCard(Icons.Filled.VpnKey, stringResource(R.string.vault_keychain), stringResource(R.string.vault_keychain_sub), onKeychain)
         NavCard(Icons.Filled.SwapHoriz, stringResource(R.string.vault_port_forwarding), stringResource(R.string.vault_port_forwarding_sub), onPortForwarding)
         NavCard(Icons.Filled.Code, stringResource(R.string.vault_snippets), stringResource(R.string.vault_snippets_sub), onSnippets)
         NavCard(Icons.Filled.Fingerprint, stringResource(R.string.vault_known_hosts), stringResource(R.string.vault_known_hosts_sub), onKnownHosts)

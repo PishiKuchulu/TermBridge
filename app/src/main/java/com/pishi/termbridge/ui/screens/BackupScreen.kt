@@ -217,6 +217,30 @@ fun BackupScreen(
             if (preview.hasCredentials) {
                 Text(text = stringResource(R.string.backup_preview_has_credentials))
             }
+            if (preview.keychainCount > 0) {
+                Text(
+                    text = stringResource(
+                        R.string.backup_preview_keychain,
+                        preview.keychainCount
+                    )
+                )
+            }
+            if (preview.snippetCount > 0) {
+                Text(
+                    text = stringResource(
+                        R.string.backup_preview_snippets,
+                        preview.snippetCount
+                    )
+                )
+            }
+            if (preview.transcriptCount > 0) {
+                Text(
+                    text = stringResource(
+                        R.string.backup_preview_transcripts,
+                        preview.transcriptCount
+                    )
+                )
+            }
             Spacer(modifier = Modifier.height(Spacing.small))
             for (host in preview.document.hosts) {
                 Text(text = "${host.name} — ${host.username}@${host.hostname}:${host.port}")

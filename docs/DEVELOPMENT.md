@@ -28,7 +28,10 @@ release; after release it must not change. Debug builds use the
 # Lint (run before claiming a phase is clean, from prompt 03 onward):
 ./gradlew :app:lintDebug
 
-# Instrumented tests need an emulator/device; they are NOT run by CI:
+# Instrumented tests need an emulator/device. CI runs them on an
+# emulator (API 29) against a real sshd fixture via
+# tests/fixture/run-instrumented-with-fixture.sh; the same command
+# works locally with a device attached:
 ./gradlew :app:connectedDebugAndroidTest
 ```
 
@@ -36,7 +39,10 @@ release; after release it must not change. Debug builds use the
 
 The authoritative build route is **GitHub Actions**
 (`.github/workflows/android-ci.yml`: JDK 17, Android SDK via
-setup-android, wrapper 8.10.2, unit tests + assembleDebug). The local
+setup-android, wrapper 8.10.2; two jobs — build: unit tests +
+assembleDebug and, on main, publishing the APK to the rolling
+`debug-latest` release; instrumented: emulator API 29 with the sshd
+fixture). The local
 sandbox is NOT a build route, for two independent, previously recorded
 reasons:
 
@@ -102,7 +108,7 @@ the wrong value would break wrapper validation.
   backup rule and may revisit this only with an explicit decision).
 - `usesCleartextTraffic = false` + fail-closed network security config
   (system trust anchors only).
-- Permissions: INTERNET + ACCESS_NETWORK_STATE, plus USE_BIOMETRIC contributed by the AndroidX biometric library for the optional app lock (to be re-verified from the merged manifest).
+- Permissions: INTERNET + ACCESS_NETWORK_STATE in the app manifest, plus USE_BIOMETRIC and USE_FINGERPRINT contributed to the merged manifest by the AndroidX biometric library for the optional app lock (verified against the biometric 1.1.0 library manifest, 2026-11-04).
 - `.gitignore` blocks keystores, `.p12/.pfx/.pem/.key`, `key.properties`,
   `local.properties`, build output, and any governance/prompt-pack
   directory copied into the tree by mistake.

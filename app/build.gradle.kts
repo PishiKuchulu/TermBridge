@@ -22,15 +22,37 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Item R-06: release signing comes from the environment
+    // (CI secrets), never from files in the repo. When the
+    // variables are absent the release build type simply stays
+    // unsigned, so local and CI debug flows are unaffected.
+    // Secret names and setup: docs/RELEASE_SIGNING.md.
+    signingConfigs {
+        create("release") {
+            val keystoreFile = System.getenv("TB_KEYSTORE_FILE")
+            if (!keystoreFile.isNullOrBlank()) {
+                storeFile = file(keystoreFile)
+                storePassword = System.getenv("TB_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TB_KEY_ALIAS")
+                keyPassword = System.getenv("TB_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
-            // Debug and release stay separate from day one. No release
-            // signing is configured here; prompt 18 owns release signing.
             applicationIdSuffix = ".debug"
             isDebuggable = true
         }
         release {
-            isMinifyEnabled = false
+            // Item R-06: R8 minification + resource shrinking
+            // are ON. The keep rules in proguard-rules.pro are
+            // load-bearing — most importantly Bouncy Castle,
+            // which SshCryptoProvider loads by reflection
+            // (Class.forName), a reference R8 cannot see.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

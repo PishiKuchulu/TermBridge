@@ -8,7 +8,11 @@ import com.pishi.termbridge.domain.CommandRunner
 import com.pishi.termbridge.domain.CommandTemplate
 import com.pishi.termbridge.domain.CommandVariable
 import com.pishi.termbridge.domain.HostProfile
+import com.pishi.termbridge.domain.ProxyConfig
+import com.pishi.termbridge.domain.ProxyKind
 import com.pishi.termbridge.domain.RemoteShell
+import com.pishi.termbridge.domain.TunnelConfig
+import com.pishi.termbridge.domain.TunnelKind
 import com.pishi.termbridge.domain.CdCommand
 import com.pishi.termbridge.domain.TerminalSender
 import com.pishi.termbridge.domain.wipe
@@ -18,14 +22,21 @@ import com.pishi.termbridge.domain.EnvApplyResult
 import com.pishi.termbridge.transport.SftpError
 import com.pishi.termbridge.transport.SftpException
 import com.pishi.termbridge.transport.SftpManager
+import com.pishi.termbridge.domain.HostKeyVerification
+import com.pishi.termbridge.transport.JumpHopRequest
 import com.pishi.termbridge.transport.SshConnection
 import com.pishi.termbridge.transport.SshConnectionRequest
 import com.pishi.termbridge.transport.SshError
 import com.pishi.termbridge.transport.SshTransport
 import com.pishi.termbridge.transport.SshTransportException
+import com.pishi.termbridge.transport.SshTunnelManager
 import com.pishi.termbridge.transport.SshjConnection
+import com.pishi.termbridge.transport.TunnelException
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.util.UUID
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +53,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -54,10 +64,14 @@ import org.junit.runner.RunWith
  * a fixture the test SKIPS with a clear message — never a
  * fake pass, never a mock called end-to-end.
  *
- * Tier 2 stays @Ignore'd with a specific reason each. The
- * original blanket blocker (docs/SSH_INTEGRATION_BLOCKER.md)
- * is updated, not deleted: the fixture now exists, but these
- * cases need fixture capabilities that do not exist yet.
+ * Tier 2: the five forwarding cases (item T-20) are
+ * implemented against the extended fixture (bastion sshd,
+ * echo service, SOCKS5 proxy — see SshFixture and
+ * tests/fixture/setup-sshd-fixture.sh); they skip only when
+ * the fixture extras were not provisioned. changedHostKeyFlow
+ * (item R-10) runs against a test-local relay re-pointed from
+ * the main sshd to the bastion, which presents its own host
+ * keys — no test in this class is @Ignore'd anymore.
  *
  * Shell-output assertions use a case trick, not wishful
  * thinking: the PTY echoes the typed command, so asserting
@@ -129,6 +143,57 @@ class SshIntegrationTest {
 
     private fun uniqueRemote(name: String): String =
         "/tmp/termbridge-it-${UUID.randomUUID()}-$name"
+
+    // ---- Item T-20 TCP helpers (blocking I/O on real dispatchers;
+    // runTest's virtual clock must never govern a socket) ----
+
+    /** Write [payload] to host:port and read the same number of
+     *  bytes back (the fixture echo service returns them). */
+    private suspend fun tcpEcho(
+        host: String,
+        port: Int,
+        payload: String
+    ): String = withContext(Dispatchers.IO) {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(host, port), 10_000)
+            socket.soTimeout = 20_000
+            val expected = payload.toByteArray()
+            socket.getOutputStream().write(expected)
+            socket.getOutputStream().flush()
+            val buffer = ByteArray(expected.size)
+            var read = 0
+            while (read < buffer.size) {
+                val n = socket.getInputStream()
+                    .read(buffer, read, buffer.size - read)
+                if (n < 0) break
+                read += n
+            }
+            String(buffer, 0, read)
+        }
+    }
+
+    /** Assert that nothing accepts TCP connections at host:port,
+     *  polling on a real-time dispatcher (listener teardown on
+     *  the server side is asynchronous). */
+    private suspend fun assertTcpRefused(host: String, port: Int) {
+        val refused = withContext(Dispatchers.Default) {
+            val deadline = System.currentTimeMillis() + 20_000
+            var ok = false
+            while (System.currentTimeMillis() < deadline) {
+                try {
+                    Socket().use {
+                        it.connect(InetSocketAddress(host, port), 2_000)
+                    }
+                    Thread.sleep(300)
+                } catch (_: Exception) {
+                    ok = true
+                    break
+                }
+            }
+            ok
+        }
+        assertTrue("Expected nothing listening on $host:$port", refused)
+    }
 
     // ---------- Tier 1: implemented ----------
 
@@ -542,41 +607,391 @@ class SshIntegrationTest {
         }
     }
 
-    // ---------- Tier 2: still blocked, specific reasons ----------
+    // ---------- Tier 2 ----------
 
-    @Ignore("Needs fixture-side host-key rotation on the SAME endpoint: restart the fixture sshd with new host keys between connects. The fixture script has no such hook yet.")
+    /**
+     * Item R-10: the changed-host-key flow, end to end. A
+     * test-local TCP relay on the emulator's own loopback is
+     * the endpoint the app dials; the relay first forwards to
+     * the main fixture sshd (host key A), then is re-pointed
+     * at the bastion sshd, which since R-10 presents its OWN
+     * host keys (key B). The dialed endpoint never changes, so
+     * the app must report a CHANGED key — and a rejection must
+     * leave the stored fingerprint untouched.
+     */
     @Test
-    fun changedHostKeyFlow() {
-        throw UnsupportedOperationException("Fixture capability missing — see SSH_INTEGRATION_BLOCKER.md")
+    fun changedHostKeyFlow() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeForwardingAvailable()
+        val relay = TcpRelay(SshFixture.host, SshFixture.port)
+        relay.start()
+        try {
+            val relayProfile = HostProfile(
+                name = "fixture-relay",
+                hostname = "127.0.0.1",
+                port = relay.port,
+                username = SshFixture.username,
+                authType = AuthType.PASSWORD
+            )
+            val endpoint = relayProfile.endpoint
+            val store = InMemoryTrustStore()
+            // First connect through the relay: unknown key A,
+            // trusted and stored.
+            val first = connect(
+                store, TestDecisionHandler(answerUnknown = true),
+                profile = relayProfile
+            )
+            first.disconnect()
+            val storedA = store.stored(endpoint)
+            assertNotNull(storedA)
+            // Re-point the relay at the bastion: same endpoint,
+            // different host key behind it now.
+            relay.retarget(SshFixture.host, SshFixture.bastionPort)
+            val handler = TestDecisionHandler(
+                answerUnknown = true, answerChanged = false
+            )
+            try {
+                connect(store, handler, profile = relayProfile)
+                fail("A changed host key that the user rejects must not connect")
+            } catch (_: SshTransportException) {
+                // Expected: verification rejected the connection.
+            }
+            val changed = handler.decisions.filter {
+                it.verification == HostKeyVerification.CHANGED
+            }
+            assertEquals(1, changed.size)
+            assertEquals(storedA, changed.single().storedFingerprint)
+            assertFalse(changed.single().fingerprint == storedA)
+            // The rejection changed nothing in the store.
+            assertEquals(storedA, store.stored(endpoint))
+        } finally {
+            relay.close()
+        }
     }
 
-    @Ignore("Needs a local TCP echo service on the fixture host plus TunnelManager coverage: fixture script does not start one yet.")
+    /**
+     * Item R-10: an RSA client key authenticates against the
+     * modern fixture sshd. OpenSSH 8.8+ refuses SHA-1 ssh-rsa
+     * signatures; sshj signs with rsa-sha2-256/512, so this
+     * passes only if the whole chain (key parse, SHA-2
+     * signature, server acceptance) is right.
+     */
     @Test
-    fun localForwardReachesServiceAndStopClosesListener() {
-        throw UnsupportedOperationException("Fixture capability missing — see SSH_INTEGRATION_BLOCKER.md")
+    fun rsaSha2ClientKeyAuthenticates() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeRsaKeyAvailable()
+        val conn = connect(
+            InMemoryTrustStore(),
+            TestDecisionHandler(answerUnknown = true),
+            profile = SshFixture.keyProfile(),
+            credential = SshFixture.rsaKeyCredential()
+        )
+        try {
+            assertTrue(conn.isConnected)
+        } finally {
+            conn.disconnect()
+        }
     }
 
-    @Ignore("Needs a fixture-side service reachable only from the fixture host plus remote-forward coverage: not provisioned yet.")
+    /**
+     * Item T-20: a local forward carries real TCP traffic to
+     * the fixture echo service, and the per-forward stop
+     * (new in T-20) closes exactly that listener.
+     */
     @Test
-    fun remoteForwardBindsAndCancelUnbinds() {
-        throw UnsupportedOperationException("Fixture capability missing — see SSH_INTEGRATION_BLOCKER.md")
+    fun localForwardReachesServiceAndStopClosesListener() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeForwardingAvailable()
+        val conn = connect(InMemoryTrustStore(), TestDecisionHandler(answerUnknown = true))
+        val manager = SshTunnelManager()
+        try {
+            val config = TunnelConfig(
+                id = 901, hostId = 0, kind = TunnelKind.LOCAL,
+                bindAddress = "127.0.0.1", bindPort = 18_080,
+                targetHost = "127.0.0.1", targetPort = SshFixture.echoPort,
+                label = "it-local"
+            )
+            val active = manager.startLocal(conn, config)
+            assertEquals(901L, active.configId)
+            assertTrue(manager.getActive().any { it.configId == 901L })
+            assertEquals("PING-T20", tcpEcho("127.0.0.1", 18_080, "PING-T20"))
+            manager.stop(conn, 901)
+            assertTrue(manager.getActive().isEmpty())
+            assertTcpRefused("127.0.0.1", 18_080)
+        } finally {
+            manager.close(conn)
+            conn.disconnect()
+        }
     }
 
-    @Ignore("Needs a second fixture sshd as bastion plus connectChain coverage: fixture script provisions one instance only.")
+    /**
+     * Item T-20: a remote forward binds on the server side
+     * (reached from the emulator as the host's loopback) and
+     * carries traffic back to the echo service; cancelling
+     * the one forward unbinds it.
+     */
     @Test
-    fun jumpChainReachesTargetAndRejectFailsCleanly() {
-        throw UnsupportedOperationException("Fixture capability missing — see SSH_INTEGRATION_BLOCKER.md")
+    fun remoteForwardBindsAndCancelUnbinds() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeForwardingAvailable()
+        val conn = connect(InMemoryTrustStore(), TestDecisionHandler(answerUnknown = true))
+        val manager = SshTunnelManager()
+        try {
+            val config = TunnelConfig(
+                id = 902, hostId = 0, kind = TunnelKind.REMOTE,
+                bindAddress = "127.0.0.1", bindPort = 19_090,
+                targetHost = "127.0.0.1", targetPort = SshFixture.echoPort,
+                label = "it-remote"
+            )
+            manager.startRemote(conn, config)
+            assertTrue(manager.getActive().any { it.configId == 902L })
+            assertEquals("PONG-T20", tcpEcho(SshFixture.host, 19_090, "PONG-T20"))
+            manager.stop(conn, 902)
+            assertTrue(manager.getActive().isEmpty())
+            assertTcpRefused(SshFixture.host, 19_090)
+        } finally {
+            manager.close(conn)
+            conn.disconnect()
+        }
     }
 
-    @Ignore("Needs a fixture-side unauthenticated SOCKS proxy: not provisioned yet.")
+    /**
+     * Item T-20: a jump chain through the bastion fixture sshd
+     * reaches the main fixture sshd (addressed as 127.0.0.1
+     * from the bastion's side) and runs a shell; a wrong target
+     * password fails the chain with AuthFailed.
+     */
     @Test
-    fun socksProxyConnectionAuthenticates() {
-        throw UnsupportedOperationException("Fixture capability missing — see SSH_INTEGRATION_BLOCKER.md")
+    fun jumpChainReachesTargetAndRejectFailsCleanly() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeForwardingAvailable()
+        val store = InMemoryTrustStore()
+        val bastion = HostProfile(
+            name = "fixture-bastion",
+            hostname = SshFixture.host,
+            port = SshFixture.bastionPort,
+            username = SshFixture.username,
+            authType = AuthType.PASSWORD
+        )
+        val targetProfile = HostProfile(
+            name = "fixture-via-bastion",
+            hostname = "127.0.0.1",
+            port = SshFixture.port,
+            username = SshFixture.username,
+            authType = AuthType.PASSWORD
+        )
+        val hopCredential = SshFixture.credential()
+        val targetCredential = SshFixture.credential()
+        val conn = try {
+            transport(store).connectChain(
+                listOf(JumpHopRequest(bastion, hopCredential)),
+                SshConnectionRequest(
+                    profile = targetProfile,
+                    credential = targetCredential
+                ),
+                TestDecisionHandler(answerUnknown = true)
+            )
+        } finally {
+            hopCredential.wipe()
+            targetCredential.wipe()
+        }
+        try {
+            assertTrue(conn.isConnected)
+            shell(conn) { session ->
+                session.sendText("echo CHAIN_OK | tr 'A-Z' 'a-z'")
+                session.sendEnter()
+                awaitOutput(session, "chain_ok")
+            }
+        } finally {
+            conn.disconnect()
+        }
+        // Reject path: the hop works, the target refuses the
+        // password — the chain must fail as AuthFailed, not hang
+        // or half-connect.
+        val hopCredential2 = SshFixture.credential()
+        val wrong = "wrong-chain-password".toByteArray()
+        try {
+            transport(store).connectChain(
+                listOf(JumpHopRequest(bastion, hopCredential2)),
+                SshConnectionRequest(profile = targetProfile, credential = wrong),
+                TestDecisionHandler(answerUnknown = true)
+            )
+            fail("Wrong target credentials must not connect through the chain")
+        } catch (e: SshTransportException) {
+            assertEquals(SshError.AuthFailed, e.error)
+        } finally {
+            hopCredential2.wipe()
+            wrong.wipe()
+        }
     }
 
-    @Ignore("Needs a fixture that rejects one forward while accepting another: not provisioned yet.")
+    /**
+     * Item T-20: a connection through the fixture SOCKS5 proxy
+     * authenticates and runs a shell. The profile's hostname is
+     * "localhost": from the emulator that is the emulator
+     * itself (nothing listens there), so this can only succeed
+     * if the proxy — on the fixture host — resolves and dials
+     * it. That is what makes the proxy path proven, not
+     * assumed.
+     */
     @Test
-    fun partialTunnelFailureStopsStartedForwards() {
-        throw UnsupportedOperationException("Fixture capability missing — see SSH_INTEGRATION_BLOCKER.md")
+    fun socksProxyConnectionAuthenticates() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeForwardingAvailable()
+        val profile = HostProfile(
+            name = "fixture-via-socks",
+            hostname = "localhost",
+            port = SshFixture.port,
+            username = SshFixture.username,
+            authType = AuthType.PASSWORD
+        )
+        val credential = SshFixture.credential()
+        val conn = try {
+            transport(InMemoryTrustStore()).connect(
+                SshConnectionRequest(
+                    profile = profile,
+                    credential = credential,
+                    proxy = ProxyConfig(
+                        kind = ProxyKind.SOCKS,
+                        proxyHost = SshFixture.host,
+                        proxyPort = SshFixture.socksPort
+                    )
+                ),
+                TestDecisionHandler(answerUnknown = true)
+            )
+        } finally {
+            credential.wipe()
+        }
+        try {
+            assertTrue(conn.isConnected)
+            shell(conn) { session ->
+                session.sendText("echo SOCKS_OK | tr 'A-Z' 'a-z'")
+                session.sendEnter()
+                awaitOutput(session, "socks_ok")
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * Item T-20: one forward starts, a second is refused by
+     * the server (its bind port is the echo service's — already
+     * bound), and applying the app's partial-failure rule —
+     * AdvancedViewModel closes the manager on any start
+     * failure — leaves nothing running. The rule itself is a
+     * ten-line composition in the ViewModel; this test proves
+     * every mechanism it composes: independent starts, a typed
+     * refusal, and a close that really frees the listener.
+     */
+    @Test
+    fun partialTunnelFailureStopsStartedForwards() = runTest(timeout = 5.minutes) {
+        SshFixture.assumeAvailable()
+        SshFixture.assumeForwardingAvailable()
+        val conn = connect(InMemoryTrustStore(), TestDecisionHandler(answerUnknown = true))
+        val manager = SshTunnelManager()
+        try {
+            val good = TunnelConfig(
+                id = 951, hostId = 0, kind = TunnelKind.LOCAL,
+                bindAddress = "127.0.0.1", bindPort = 18_180,
+                targetHost = "127.0.0.1", targetPort = SshFixture.echoPort,
+                label = "it-partial-good"
+            )
+            manager.startLocal(conn, good)
+            assertEquals("PART-T20", tcpEcho("127.0.0.1", 18_180, "PART-T20"))
+            val doomed = TunnelConfig(
+                id = 952, hostId = 0, kind = TunnelKind.REMOTE,
+                bindAddress = "127.0.0.1", bindPort = SshFixture.echoPort,
+                targetHost = "127.0.0.1", targetPort = SshFixture.echoPort,
+                label = "it-partial-doomed"
+            )
+            try {
+                manager.startRemote(conn, doomed)
+                fail("A remote forward onto an already-bound port must be refused")
+            } catch (_: TunnelException) {
+                // Expected: the server refuses the bind.
+            }
+            // The AdvancedViewModel partial-failure rule.
+            manager.close(conn)
+            assertTrue(manager.getActive().isEmpty())
+            assertTcpRefused("127.0.0.1", 18_180)
+        } finally {
+            manager.close(conn)
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * A minimal loopback TCP relay for the R-10 changed-key
+     * test: accepts on 127.0.0.1 (emulator-local), forwards to
+     * a mutable target. One connection at a time is all the
+     * test needs; pumps are daemon threads and die with the
+     * sockets on [close].
+     */
+    private class TcpRelay(initialHost: String, initialPort: Int) {
+        @Volatile
+        private var targetHost: String = initialHost
+
+        @Volatile
+        private var targetPort: Int = initialPort
+
+        private val server = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val port: Int get() = server.localPort
+
+        @Volatile
+        private var closed = false
+        private val live = java.util.Collections.synchronizedList(mutableListOf<Socket>())
+
+        fun start() {
+            Thread {
+                while (!closed) {
+                    val clientSide = try {
+                        server.accept()
+                    } catch (_: Exception) {
+                        break
+                    }
+                    live += clientSide
+                    val upstream = try {
+                        Socket(targetHost, targetPort).also { live += it }
+                    } catch (_: Exception) {
+                        runCatching { clientSide.close() }
+                        continue
+                    }
+                    pump(clientSide, upstream)
+                    pump(upstream, clientSide)
+                }
+            }.apply { isDaemon = true }.start()
+        }
+
+        private fun pump(from: Socket, to: Socket) {
+            Thread {
+                try {
+                    val input = from.getInputStream()
+                    val output = to.getOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        output.flush()
+                    }
+                } catch (_: Exception) {
+                    // Peer went away; the other pump ends too.
+                } finally {
+                    runCatching { to.shutdownOutput() }
+                }
+            }.apply { isDaemon = true }.start()
+        }
+
+        fun retarget(host: String, port: Int) {
+            targetHost = host
+            targetPort = port
+        }
+
+        fun close() {
+            closed = true
+            runCatching { server.close() }
+            synchronized(live) { live.forEach { runCatching { it.close() } } }
+        }
     }
 }

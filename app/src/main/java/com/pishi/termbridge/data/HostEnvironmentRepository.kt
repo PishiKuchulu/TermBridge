@@ -72,7 +72,10 @@ class HostEnvironmentRepository(
                 ) ?: "",
                 localDirectoryUri = settings.localDirectoryUri?.ifBlank { null },
                 remoteShell = settings.remoteShell.name,
-                shellConfirmed = settings.shellConfirmed
+                shellConfirmed = settings.shellConfirmed,
+                envExportFallback = settings.envExportFallback,
+                sessionLogEnabled = settings.sessionLogEnabled,
+                sessionLogInBackup = settings.sessionLogInBackup
             )
         )
     }
@@ -117,7 +120,12 @@ class HostEnvironmentRepository(
         }
         val valueBytes = valueText.toByteArray(Charsets.UTF_8)
         try {
-            val blob = secretCrypto.encrypt(valueBytes)
+            // Item R-02: the value blob is bound to this host
+            // and variable name via the AAD context.
+            val blob = secretCrypto.encrypt(
+                valueBytes,
+                com.pishi.termbridge.security.BlobContexts.envValue(hostId, trimmedName)
+            )
             if (isNew) {
                 val siblings = envVarDao.getForHostOnce(hostId)
                 val sortOrder = (siblings.maxOfOrNull { it.sortOrder } ?: -1) + 1
@@ -169,8 +177,14 @@ class HostEnvironmentRepository(
         val values = mutableListOf<EnvVarValue>()
         val undecryptable = mutableListOf<String>()
         for (row in envVarDao.getForHostOnce(hostId)) {
+            val context =
+                com.pishi.termbridge.security.BlobContexts.envValue(hostId, row.name)
             try {
-                values += EnvVarValue(row.name, secretCrypto.decrypt(row.valueBlob))
+                val plain = secretCrypto.decrypt(row.valueBlob, context)
+                migrateLegacyBlob(secretCrypto, row.valueBlob, plain, context) { upgraded ->
+                    envVarDao.update(row.copy(valueBlob = upgraded))
+                }
+                values += EnvVarValue(row.name, plain)
             } catch (_: Exception) {
                 undecryptable += row.name
             }
@@ -184,6 +198,9 @@ class HostEnvironmentRepository(
             remoteWorkingDirectory = remoteWorkingDirectory,
             localDirectoryUri = localDirectoryUri,
             remoteShell = RemoteShell.valueOf(remoteShell),
-            shellConfirmed = shellConfirmed
+            shellConfirmed = shellConfirmed,
+            envExportFallback = envExportFallback,
+            sessionLogEnabled = sessionLogEnabled,
+            sessionLogInBackup = sessionLogInBackup
         )
 }

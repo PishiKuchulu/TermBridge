@@ -87,10 +87,13 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 pendingTrust?.let {
                     trustStore.trustHostKey(it.endpoint, it.fingerprint, it.keyType)
                 }
+                val connection = SshjConnection(profile, client)
                 if (request.keepAliveSeconds > 0) {
-                    client.connection.keepAlive.keepAliveInterval = request.keepAliveSeconds
+                    connection.startKeepAlive(
+                        request.keepAliveSeconds, request.keepAliveMaxMisses
+                    )
                 }
-                SshjConnection(profile, client)
+                connection
             }
         } catch (e: Throwable) {
             // Deterministic cleanup on failure — including a rejected
@@ -193,7 +196,13 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 for (pending in pendingTrusts) {
                     trustStore.trustHostKey(pending.endpoint, pending.fingerprint, pending.keyType)
                 }
-                ChainedSshConnection(target.profile, clients)
+                val chained = ChainedSshConnection(target.profile, clients)
+                if (target.keepAliveSeconds > 0) {
+                    chained.startKeepAlive(
+                        target.keepAliveSeconds, target.keepAliveMaxMisses
+                    )
+                }
+                chained
             }
         } catch (e: Throwable) {
             // Partial failure: disconnect every client opened so
@@ -230,7 +239,20 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
         val endpoint = profile.endpoint
         var pendingTrust: PendingTrust? = null
         client.setConnectTimeout(connectTimeoutMs)
-        client.setTimeout(socketTimeoutMs)
+        // Item R-01 (review #2 F-13, PROVEN against the pinned
+        // sshj jar): KeyExchanger.waitForDone() awaits the kex
+        // "done" event with transport.getTimeoutMs(), and the
+        // host-key verifier runs synchronously on the reader
+        // thread inside that window — our verifier blocks there
+        // until the user decides on the trust dialog. With the
+        // regular 30 s transport timeout, a user who reads the
+        // fingerprint for longer than that finds the connection
+        // already dead when they tap Trust. So the handshake
+        // phase runs with a human-scale timeout; the caller's
+        // socketTimeoutMs is restored right after auth, before
+        // this function returns, and governs the session from
+        // then on.
+        client.setTimeout(HANDSHAKE_TIMEOUT_MS)
         client.addHostKeyVerifier(
             object : HostKeyVerifier {
                 override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
@@ -293,7 +315,23 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 client.authPublickey(profile.username, keyProvider)
             }
         }
+        // Item R-01: handshake over — restore the session's
+        // regular transport timeout (see the note at the top of
+        // this function).
+        client.setTimeout(socketTimeoutMs)
         return pendingTrust
+    }
+
+    companion object {
+        /**
+         * Transport timeout for the connect + kex + auth phase
+         * only (item R-01). It exists so a person can read a
+         * host-key fingerprint and decide without racing a
+         * 30-second clock; it is still bounded, so an
+         * unattended dialog cannot hold a half-open connection
+         * forever.
+         */
+        const val HANDSHAKE_TIMEOUT_MS = 300_000
     }
 }
 
@@ -320,11 +358,131 @@ class SshTransportException(
     fun userFacingMessage(): String = message ?: error.userMessage
 }
 
+/**
+ * The app's own keep-alive probe loop (item T-14): sshj's
+ * built-in keep-alive has an interval but no max-unanswered
+ * count, so this loop sends a `keepalive@openssh.com` global
+ * request every interval and counts consecutive misses with
+ * [com.pishi.termbridge.domain.KeepAlivePolicy]; at the limit
+ * it disconnects. Any reply packet — success or failure —
+ * counts as alive (some servers answer failure to the request
+ * name but are plainly up). The thread is a daemon and stops
+ * on disconnect.
+ */
+internal class KeepAliveRunner(
+    private val client: SSHClient,
+    private val intervalSeconds: Int,
+    maxMisses: Int,
+    private val onGiveUp: () -> Unit
+) {
+    private val policy = com.pishi.termbridge.domain.KeepAlivePolicy(maxMisses)
+
+    @Volatile
+    private var thread: Thread? = null
+
+    fun start() {
+        val t = Thread({
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    Thread.sleep(intervalSeconds * 1000L)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                if (!client.isConnected) break
+                if (probe()) {
+                    policy.onReply()
+                } else if (policy.onMiss()) {
+                    onGiveUp()
+                    break
+                }
+            }
+        }, "termbridge-keepalive")
+        t.isDaemon = true
+        thread = t
+        t.start()
+    }
+
+    fun stop() {
+        thread?.interrupt()
+        thread = null
+    }
+
+    private fun probe(): Boolean = try {
+        val timeoutMs = try {
+            client.connection.timeoutMs
+        } catch (_: Exception) {
+            30_000
+        }
+        val promise = client.connection.sendGlobalRequest(
+            "keepalive@openssh.com", true, byteArrayOf()
+        )
+        promise.tryRetrieve(timeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS) != null
+    } catch (_: Exception) {
+        false
+    }
+}
+
 /** Transport-internal connection holder. UI must not use sshClient. */
+/**
+ * Items T-11/T-16: one-shot command execution over a SEPARATE
+ * session channel on an already-authenticated connection —
+ * never typed into the interactive shell. Both connection
+ * holders implement it; the chained variant runs on the
+ * target client (the end of the chain).
+ */
+interface SshExecChannel {
+    /**
+     * Runs [command] and returns its stdout as UTF-8 text,
+     * capped at [EXEC_OUTPUT_CAP] bytes. The exit status is
+     * deliberately NOT an error: probe commands legitimately
+     * fail on some servers, and interpreting output is the
+     * caller's job. Transport failures throw.
+     */
+    suspend fun execOnce(command: String, timeoutMs: Long = 10_000): String
+
+    companion object {
+        const val EXEC_OUTPUT_CAP = 512 * 1024
+    }
+}
+
+/** Shared exec implementation over one sshj client. */
+internal suspend fun execOnceOn(
+    client: SSHClient,
+    command: String,
+    timeoutMs: Long
+): String = withContext(Dispatchers.IO) {
+    client.startSession().use { session ->
+        val cmd = session.exec(command)
+        val buffer = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        var total = 0
+        val input = cmd.inputStream
+        while (total < SshExecChannel.EXEC_OUTPUT_CAP) {
+            val read = input.read(
+                chunk, 0, minOf(chunk.size, SshExecChannel.EXEC_OUTPUT_CAP - total)
+            )
+            if (read < 0) break
+            buffer.write(chunk, 0, read)
+            total += read
+        }
+        try {
+            cmd.join(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+            // A probe that outlives its budget yields whatever
+            // stdout arrived; the caller interprets it.
+        }
+        buffer.toString("UTF-8")
+    }
+}
+
 class SshjConnection(
     override val profile: HostProfile,
     internal val sshClient: SSHClient
-) : SshConnection {
+) : SshConnection, SshExecChannel {
+    override suspend fun execOnce(command: String, timeoutMs: Long): String =
+        execOnceOn(sshClient, command, timeoutMs)
+    private var keepAlive: KeepAliveRunner? = null
+
     override val isConnected: Boolean
         get() = try {
             sshClient.isConnected
@@ -332,7 +490,16 @@ class SshjConnection(
             false
         }
 
+    fun startKeepAlive(intervalSeconds: Int, maxMisses: Int) {
+        if (intervalSeconds <= 0) return
+        keepAlive?.stop()
+        keepAlive = KeepAliveRunner(sshClient, intervalSeconds, maxMisses) { disconnect() }
+            .also { it.start() }
+    }
+
     override fun disconnect() {
+        keepAlive?.stop()
+        keepAlive = null
         try {
             sshClient.disconnect()
         } catch (_: Exception) {
@@ -351,7 +518,14 @@ class SshjConnection(
 class ChainedSshConnection(
     override val profile: HostProfile,
     internal val clients: List<SSHClient>
-) : SshConnection {
+) : SshConnection, SshExecChannel {
+    override suspend fun execOnce(command: String, timeoutMs: Long): String {
+        val target = clients.lastOrNull()
+            ?: throw SshTransportException(SshError.NetworkError)
+        return execOnceOn(target, command, timeoutMs)
+    }
+    private var keepAlive: KeepAliveRunner? = null
+
     override val isConnected: Boolean
         get() = try {
             clients.lastOrNull()?.isConnected == true
@@ -359,7 +533,19 @@ class ChainedSshConnection(
             false
         }
 
+    /** Probes ride the target client: if the end of the chain
+     *  answers, every hop under it is carrying traffic. */
+    fun startKeepAlive(intervalSeconds: Int, maxMisses: Int) {
+        if (intervalSeconds <= 0) return
+        val target = clients.lastOrNull() ?: return
+        keepAlive?.stop()
+        keepAlive = KeepAliveRunner(target, intervalSeconds, maxMisses) { disconnect() }
+            .also { it.start() }
+    }
+
     override fun disconnect() {
+        keepAlive?.stop()
+        keepAlive = null
         for (client in clients.asReversed()) {
             try {
                 client.disconnect()

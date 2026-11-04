@@ -9,8 +9,9 @@
 #      kotlinc 2.0.21 against android.jar (API 35) + the dependency jars.
 #   3. Compiles and RUNS every JVM unit test with JUnitCore.
 #   4. Compiles the device-independent instrumented tests (SshFixture,
-#      SshIntegrationTest, KeystoreAndRoomTest) — compile-only, because
-#      they need an emulator to RUN.
+#      SshIntegrationTest, KeystoreAndRoomTest, CryptoProviderTest,
+#      RfbIntegrationTest) — compile-only, because they need an
+#      emulator to RUN.
 #   5. Compiles the XML resources with aapt2 and syntax-checks the
 #      fixture shell scripts.
 #
@@ -136,6 +137,23 @@ if [ "$SKIP_DEPS" = 0 ]; then
   fetch_aar "$GOOGLE" androidx/test/ext junit 1.2.1
   fetch_aar "$GOOGLE" androidx/test runner 1.6.1
   fetch_aar "$GOOGLE" androidx/core core 1.15.0
+  # App-lock groundwork (2026-11-04): ui/BiometricHelper.kt is not a
+  # Compose file, so it is inside this harness's compile scope, but the
+  # biometric dependency (added with the app-lock work) was never added
+  # here. Versions mirror the tree's catalog / resolved graph:
+  # biometric 1.1.0 (catalog), fragment 1.2.5 (biometric's POM),
+  # activity 1.9.3 + lifecycle 2.8.7 + core 1.15.0 (catalog pins win),
+  # savedstate 1.2.1 (activity's POM).
+  fetch_aar "$GOOGLE" androidx/biometric biometric 1.1.0
+  fetch_aar "$GOOGLE" androidx/fragment fragment 1.2.5
+  fetch_aar "$GOOGLE" androidx/activity activity 1.9.3
+  # Lifecycle 2.8.x is Kotlin-multiplatform: the plain artifacts are
+  # metadata-only, the Android/JVM classes live in the -android / -jvm
+  # variants (verified against Google Maven, 2026-11-04).
+  fetch_aar "$GOOGLE" androidx/lifecycle lifecycle-runtime-android 2.8.7
+  fetch_aar "$GOOGLE" androidx/lifecycle lifecycle-viewmodel-android 2.8.7
+  fetch_jar "$GOOGLE" androidx/lifecycle lifecycle-common-jvm 2.8.7
+  fetch_aar "$GOOGLE" androidx/savedstate savedstate 1.2.1
 fi
 
 join_by() { local IFS="$1"; shift; echo "$*"; }
@@ -153,7 +171,15 @@ MAIN_CP="$(join_by : "$ANDROID_JAR" \
   "$DEPS/room-runtime-2.6.1-classes.jar" \
   "$DEPS/room-common-2.6.1.jar" \
   "$DEPS/room-ktx-2.6.1-classes.jar" \
-  "$DEPS/sqlite-android-2.5.0-classes.jar")"
+  "$DEPS/sqlite-android-2.5.0-classes.jar" \
+  "$DEPS/core-1.15.0-classes.jar" \
+  "$DEPS/biometric-1.1.0-classes.jar" \
+  "$DEPS/fragment-1.2.5-classes.jar" \
+  "$DEPS/activity-1.9.3-classes.jar" \
+  "$DEPS/lifecycle-runtime-android-2.8.7-classes.jar" \
+  "$DEPS/lifecycle-viewmodel-android-2.8.7-classes.jar" \
+  "$DEPS/lifecycle-common-jvm-2.8.7.jar" \
+  "$DEPS/savedstate-1.2.1-classes.jar")"
 OLD_IFS="$IFS"; IFS=':'
 for j in $MAIN_CP; do
   [ -s "$j" ] || fail "missing classpath jar: $j (run without --skip-deps)"
@@ -195,12 +221,13 @@ echo "  unit-test compilation OK ($UNIT_COUNT files)"
 
 if [ "$SKIP_RUN" = 0 ]; then
   note "stage 2b: running unit tests (JUnitCore)"
-  TEST_CLASSES=""
-  while read -r f; do
-    pkg="$(grep -m1 '^package ' "$f" | sed 's/^package //;s/;//;s/ *$//')"
-    cls="$(basename "$f" .kt)"
-    TEST_CLASSES="$TEST_CLASSES $pkg.$cls"
-  done < "$OUT/unit.lst"
+  # Derive runnable classes from the compiled output, not from source
+  # file names: one *Test.kt file may hold several test classes
+  # (Phase2Test.kt holds QuickConnectTest, SubnetPlannerTest and
+  # ConnectionLogCodecTest, and no Phase2Test class at all), and a
+  # file-name guess makes JUnitCore abort the entire run at parse time.
+  TEST_CLASSES="$(cd "$OUT/test" && find . -name "*Test.class" ! -name '*$*' \
+    | sed 's|^\./||; s|\.class$||; s|/|.|g' | sort | tr '\n' ' ')"
   # -Djava.net.preferIPv4Stack=true is REQUIRED in this sandbox: without
   # it, Java loopback sockets are intercepted (a Java client reads
   # "muse: Other " instead of the peer's bytes; Python loopback is
@@ -219,10 +246,12 @@ printf '%s\n' \
   "$ROOT/app/src/androidTest/java/com/pishi/termbridge/SshFixture.kt" \
   "$ROOT/app/src/androidTest/java/com/pishi/termbridge/SshIntegrationTest.kt" \
   "$ROOT/app/src/androidTest/java/com/pishi/termbridge/KeystoreAndRoomTest.kt" \
+  "$ROOT/app/src/androidTest/java/com/pishi/termbridge/CryptoProviderTest.kt" \
+  "$ROOT/app/src/androidTest/java/com/pishi/termbridge/RfbIntegrationTest.kt" \
   > "$OUT/androidtest.lst"
 "$KOTLINC_BIN" -jvm-target 17 -Xfriend-paths="$OUT/main" -cp "$ANDROIDTEST_CP" -d "$OUT/androidTest" @"$OUT/androidtest.lst" \
   || fail "instrumented-test compilation failed (this is the run #20 error class)"
-echo "  instrumented-test compilation OK (3 files; MainActivitySmokeTest excluded — needs Compose test + UI, CI proves it)"
+echo "  instrumented-test compilation OK (5 files; MainActivitySmokeTest excluded — needs Compose test + UI, CI proves it)"
 
 # --- stage 4: resources + fixture scripts ------------------------------------
 if [ -x "$AAPT2_BIN" ]; then
@@ -240,5 +269,5 @@ bash -n "$ROOT/tests/fixture/run-instrumented-with-fixture.sh" || fail "run-inst
 echo "  fixture scripts OK"
 
 echo
-echo "LOCAL-CHECK PASSED: main=$MAIN_COUNT files, unit tests=$UNIT_COUNT files compiled (+ run unless --skip-run), instrumented=3 files compiled."
+echo "LOCAL-CHECK PASSED: main=$MAIN_COUNT files, unit tests=$UNIT_COUNT files compiled (+ run unless --skip-run), instrumented=5 files compiled."
 echo "Still requires CI: Compose UI compile, Gradle build/packaging, emulator fixture tests, device behaviour."

@@ -31,6 +31,22 @@ import org.junit.Test
  *  crypto is the in-memory AES-GCM test double (test sources
  *  only) — the point here is service behaviour, not Keystore
  *  hardware, which the instrumented tests cover. */
+/** Item T-03: in-memory transcript storage for service tests. */
+private class FakeTranscriptStorage :
+    com.pishi.termbridge.settings.TranscriptStorage {
+    val texts = mutableMapOf<Long, String>()
+    override fun append(hostId: Long, text: String) {
+        texts[hostId] = (texts[hostId] ?: "") + text
+    }
+    override fun read(hostId: Long): String = texts[hostId] ?: ""
+    override fun write(hostId: Long, text: String) {
+        texts[hostId] = text
+    }
+    override fun clear(hostId: Long) {
+        texts.remove(hostId)
+    }
+}
+
 private class BackupWorld {
     val hostDao = FakeHostDao()
     val trustedDao = FakeTrustedHostKeyDao()
@@ -42,17 +58,55 @@ private class BackupWorld {
     val proxyDao = FakeProxyDao()
     val crypto = FakeSecretCrypto()
 
+    val keychainDao = FakeKeychainDao()
     val advancedRepo = AdvancedRepository(tunnelDao, jumpDao, proxyDao, hostDao)
     val hostRepo = HostRepository(
         hostDao, trustedDao, crypto,
         commandButtonDao = commandDao,
         hostSettingsDao = settingsDao,
         hostEnvVarDao = envDao,
-        advancedRepository = advancedRepo
+        advancedRepository = advancedRepo,
+        keychainDao = keychainDao
     )
     val commandRepo = CommandRepository(commandDao)
     val envRepo = HostEnvironmentRepository(settingsDao, envDao, crypto)
+    val keychainRepo = com.pishi.termbridge.data.KeychainRepository(
+        keychainDao, hostDao, crypto
+    )
     val service = BackupService(hostRepo, commandRepo, envRepo, advancedRepo)
+    val keychainService = BackupService(
+        hostRepo, commandRepo, envRepo, advancedRepo,
+        keychainRepository = keychainRepo
+    )
+    val snippetDao = FakeSnippetDao()
+    val snippetRepo = com.pishi.termbridge.data.SnippetRepository(snippetDao)
+    val snippetService = BackupService(
+        hostRepo, commandRepo, envRepo, advancedRepo,
+        snippetRepository = snippetRepo
+    )
+    val transcriptStorage = FakeTranscriptStorage()
+    val transcriptService = BackupService(
+        hostRepo, commandRepo, envRepo, advancedRepo,
+        transcriptStore = transcriptStorage
+    )
+
+    /** A keychain password entry plus one host linked to it. */
+    suspend fun seedKeychainHost(): HostProfile {
+        val entry = keychainRepo.saveEntry(
+            com.pishi.termbridge.domain.KeychainEntry(
+                label = "Prod password", kind = AuthType.PASSWORD
+            ),
+            CredentialInput.Password("shared-secret-999".toCharArray())
+        )
+        return hostRepo.saveHost(
+            HostProfile(
+                name = "Linked box", hostname = "198.51.100.7", port = 22,
+                username = "root", authType = AuthType.PASSWORD,
+                keychainEntryId = entry.id
+            ),
+            credential = null
+        )
+    }
 
     suspend fun seedHost(
         name: String = "Home server",
@@ -310,5 +364,196 @@ class BackupServiceTest {
         val restored = target.hostRepo.getHosts().first()
             .first { it.hostname == "192.168.1.10" }
         assertTrue(target.advancedRepo.getJumpChainOnce(restored.id).jumpHostIds.isEmpty())
+    }
+
+    @Test
+    fun encryptedKeychainRoundTripRestoresEntryAndLink() = runTest {
+        val source = BackupWorld()
+        source.seedKeychainHost()
+        val text = source.keychainService.buildExport(
+            true, "correct-horse-battery".toCharArray()
+        )
+        // The shared secret rides in the keychain section only:
+        // it appears exactly once in the encrypted payload's
+        // plaintext — never duplicated as a host credential.
+        val target = BackupWorld()
+        val preview = target.keychainService.parseForPreview(
+            text, "correct-horse-battery".toCharArray()
+        )
+        assertEquals(1, preview.keychainCount)
+        assertTrue(preview.hasCredentials)
+        val result = target.keychainService.applyImport(preview, false)
+        assertTrue(result.importedNames.contains("Linked box"))
+        val entry = target.keychainRepo.getByLabel("Prod password")
+        assertTrue(entry != null)
+        val restored = target.hostRepo.getHosts().first().single()
+        assertEquals(entry!!.id, restored.keychainEntryId)
+        assertArrayEquals(
+            "shared-secret-999".toByteArray(),
+            target.hostRepo.loadCredential(restored.id)
+        )
+    }
+
+    @Test
+    fun plainKeychainExportRestoresNeitherEntryNorLink() = runTest {
+        val source = BackupWorld()
+        source.seedKeychainHost()
+        val text = source.keychainService.buildExport(false, null)
+        assertFalse(text.contains("shared-secret-999"))
+
+        val target = BackupWorld()
+        val preview = target.keychainService.parseForPreview(text, null)
+        assertEquals(1, preview.keychainCount)
+        val result = target.keychainService.applyImport(preview, false)
+        assertTrue(result.warnings.any { it.contains("was not restored") })
+        assertTrue(result.warnings.any { it.contains("has no credential in this backup") })
+        assertNull(target.keychainRepo.getByLabel("Prod password"))
+        // A fresh host cannot be created without a credential —
+        // the app's standing rule for every non-secret import,
+        // keychain or not — so the host is reported, not made.
+        assertTrue(result.importedNames.isEmpty())
+        assertTrue(target.hostRepo.getHosts().first().isEmpty())
+    }
+
+    @Test
+    fun plainKeychainReplaceKeepsExistingCredential() = runTest {
+        val source = BackupWorld()
+        source.seedKeychainHost()
+        val text = source.keychainService.buildExport(false, null)
+
+        val target = BackupWorld()
+        val existing = target.hostRepo.saveHost(
+            HostProfile(
+                name = "Linked box", hostname = "198.51.100.7", port = 22,
+                username = "root", authType = AuthType.PASSWORD
+            ),
+            CredentialInput.Password("existing-password".toCharArray())
+        )
+        val preview = target.keychainService.parseForPreview(text, null)
+        assertEquals(1, preview.conflicts.size)
+        val result = target.keychainService.applyImport(preview, true)
+        assertTrue(result.replacedNames.contains("Linked box"))
+        assertTrue(result.warnings.any { it.contains("kept its existing credential") })
+        assertNull(target.keychainRepo.getByLabel("Prod password"))
+        val restored = target.hostRepo.getHosts().first().single()
+        assertEquals(existing.id, restored.id)
+        assertNull(restored.keychainEntryId)
+        assertArrayEquals(
+            "existing-password".toByteArray(),
+            target.hostRepo.loadCredential(restored.id)
+        )
+    }
+
+    @Test
+    fun keychainLabelCollisionImportsUnderSuffixedLabel() = runTest {
+        val source = BackupWorld()
+        source.seedKeychainHost()
+        val text = source.keychainService.buildExport(
+            true, "correct-horse-battery".toCharArray()
+        )
+
+        val target = BackupWorld()
+        target.keychainRepo.saveEntry(
+            com.pishi.termbridge.domain.KeychainEntry(
+                label = "Prod password", kind = AuthType.PASSWORD
+            ),
+            CredentialInput.Password("local-password".toCharArray())
+        )
+        val preview = target.keychainService.parseForPreview(
+            text, "correct-horse-battery".toCharArray()
+        )
+        val result = target.keychainService.applyImport(preview, false)
+        assertTrue(result.warnings.any { it.contains("(imported)") })
+        val imported = target.keychainRepo.getByLabel("Prod password (imported)")
+        assertTrue(imported != null)
+        // The pre-existing entry is untouched.
+        assertArrayEquals(
+            "local-password".toByteArray(),
+            target.keychainRepo.loadMaterial(
+                target.keychainRepo.getByLabel("Prod password")!!.id
+            )
+        )
+        val restored = target.hostRepo.getHosts().first().single()
+        assertEquals(imported!!.id, restored.keychainEntryId)
+        assertArrayEquals(
+            "shared-secret-999".toByteArray(),
+            target.hostRepo.loadCredential(restored.id)
+        )
+    }
+
+    @Test
+    fun snippetsRoundTripThroughBackup() = runTest {
+        // Item T-02: a global snippet survives export + import
+        // with its steps and variables, still global.
+        val source = BackupWorld()
+        source.snippetRepo.saveSnippet(
+            CommandButton(
+                hostId = com.pishi.termbridge.data.GLOBAL_HOST_ID,
+                label = "Deploy", mode = CommandMode.SEQUENCE,
+                template = "",
+                steps = listOf("git pull", "systemctl restart {{unit}}"),
+                variables = listOf(
+                    com.pishi.termbridge.domain.CommandVariable(
+                        name = "unit", defaultValue = "app", required = true
+                    )
+                )
+            )
+        )
+        val text = source.snippetService.buildExport(false, null)
+
+        val target = BackupWorld()
+        val preview = target.snippetService.parseForPreview(text, null)
+        assertEquals(1, preview.snippetCount)
+        val result = target.snippetService.applyImport(preview, false)
+        assertTrue(result.warnings.none { it.contains("Snippet") })
+        val restored = target.snippetRepo.getSnippetsOnce().single()
+        assertEquals("Deploy", restored.label)
+        assertEquals(
+            com.pishi.termbridge.data.GLOBAL_HOST_ID, restored.hostId
+        )
+        assertEquals(
+            listOf("git pull", "systemctl restart {{unit}}"), restored.steps
+        )
+        assertEquals("unit", restored.variables.single().name)
+    }
+
+    @Test
+    fun transcriptRoundTripThroughEncryptedBackup() = runTest {
+        // Item T-03: an opted-in host's transcript rides an
+        // encrypted backup and is restored with its opt-ins;
+        // a plain export never carries it.
+        val source = BackupWorld()
+        val host = source.seedHost()
+        source.envRepo.saveSettings(
+            com.pishi.termbridge.domain.HostEnvironmentSettings(
+                hostId = host.id,
+                sessionLogEnabled = true,
+                sessionLogInBackup = true
+            )
+        )
+        source.transcriptStorage.write(host.id, "hello transcript\n")
+
+        val plain = source.transcriptService.buildExport(false, null)
+        val plainPreview = source.transcriptService.parseForPreview(plain, null)
+        assertEquals(0, plainPreview.transcriptCount)
+
+        val encrypted = source.transcriptService.buildExport(
+            true, "pass-phrase-123".toCharArray()
+        )
+        val target = BackupWorld()
+        val preview = target.transcriptService.parseForPreview(
+            encrypted, "pass-phrase-123".toCharArray()
+        )
+        assertEquals(1, preview.transcriptCount)
+        val result = target.transcriptService.applyImport(preview, false)
+        assertTrue(result.warnings.none { it.contains("Transcript") })
+        val restoredHost = target.hostRepo.getHosts().first().single()
+        assertEquals(
+            "hello transcript\n",
+            target.transcriptStorage.read(restoredHost.id)
+        )
+        val restoredSettings = target.envRepo.getSettingsOnce(restoredHost.id)
+        assertEquals(true, restoredSettings?.sessionLogEnabled)
+        assertEquals(true, restoredSettings?.sessionLogInBackup)
     }
 }

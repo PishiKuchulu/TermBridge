@@ -141,22 +141,34 @@ class SftpManager(private val connection: SshjConnection) {
      * Download with progress + cancellation. [expectedSize] comes
      * from the listing; after the stream finishes, bytes written
      * must equal it when it is known, otherwise integrity fails.
+     *
+     * Item T-21 resume: with [startOffset] > 0 the remote file
+     * is read from that offset (the caller appends to the
+     * partial destination). Progress and the integrity check
+     * stay total-based: the counting stream is seeded with the
+     * offset, so [expectedSize] still means the whole file.
      */
     fun download(
         remotePath: String,
         output: OutputStream,
         expectedSize: Long?,
         onProgress: (Long) -> Unit,
-        isCancelled: () -> Boolean
+        isCancelled: () -> Boolean,
+        startOffset: Long = 0
     ) {
         val normalized = RemotePath.normalize(remotePath) ?: throw SftpException(SftpError.NotFound)
-        val counting = CountingOutputStream(output, onProgress, isCancelled)
+        val counting = CountingOutputStream(output, onProgress, isCancelled, startOffset)
         try {
             // sshj 0.40.0 has no get(String, OutputStream):
             // stream through the remote file's own input stream.
             val remote = ensureSftp().open(normalized, setOf(OpenMode.READ))
             try {
-                remote.RemoteFileInputStream().copyTo(counting)
+                val stream = if (startOffset > 0) {
+                    remote.RemoteFileInputStream(startOffset)
+                } else {
+                    remote.RemoteFileInputStream()
+                }
+                stream.copyTo(counting)
             } finally {
                 remote.close()
             }
@@ -187,29 +199,57 @@ class SftpManager(private val connection: SshjConnection) {
      * exists; if the rename then fails, the complete upload is kept
      * under its temporary name rather than deleted.
      */
+    /** Item T-21: state needed to resume a cancelled upload —
+     *  the retained temporary file and how many bytes of the
+     *  source it already holds. */
+    data class UploadResume(
+        val tempPath: String,
+        val bytesAlreadySent: Long
+    )
+
     fun upload(
         input: InputStream,
         remotePath: String,
         onProgress: (Long) -> Unit,
         isCancelled: () -> Boolean,
-        overwrite: Boolean = false
+        overwrite: Boolean = false,
+        tempToken: String = java.util.UUID.randomUUID().toString().take(8),
+        resume: UploadResume? = null,
+        keepTempOnCancel: Boolean = false
     ): Long {
         val normalized = RemotePath.normalize(remotePath) ?: throw SftpException(SftpError.NotFound)
-        val parent = RemotePath.parent(normalized)
-        val targetName = normalized.substringAfterLast('/')
-        val tempPath = RemotePath.join(
-            parent,
-            ".$targetName.tbpart-" + java.util.UUID.randomUUID().toString().take(8)
-        ) ?: throw SftpException(SftpError.Generic)
-        val counting = CountingInputStream(input, onProgress, isCancelled)
+        val tempPath = resume?.tempPath ?: tempPathFor(normalized, tempToken)
+            ?: throw SftpException(SftpError.Generic)
+        val resumeFrom = resume?.bytesAlreadySent ?: 0L
+        if (resume != null) {
+            // Resume is only sound when the retained temp holds
+            // exactly the prefix the caller believes it does;
+            // anything else restarts from zero (the caller falls
+            // back to a fresh upload on this failure).
+            try {
+                if (statSize(tempPath) != resumeFrom) {
+                    throw SftpException(SftpError.Generic)
+                }
+                skipFully(input, resumeFrom)
+            } catch (e: SftpException) {
+                throw e
+            } catch (e: Exception) {
+                throw SftpException(SftpError.Generic, e)
+            }
+        }
+        val counting = CountingInputStream(input, onProgress, isCancelled, resumeFrom)
         var tempWritten = false
         try {
             // sshj 0.40.0 has no put(InputStream, String):
             // stream through the remote file's own output stream.
-            val remote = ensureSftp().open(
-                tempPath,
-                setOf(OpenMode.WRITE, OpenMode.CREAT, OpenMode.EXCL)
-            )
+            val remote = if (resume != null) {
+                ensureSftp().open(tempPath, setOf(OpenMode.WRITE))
+            } else {
+                ensureSftp().open(
+                    tempPath,
+                    setOf(OpenMode.WRITE, OpenMode.CREAT, OpenMode.EXCL)
+                )
+            }
             tempWritten = true
             try {
                 // Closing the OUTPUT STREAM flushes and waits for the
@@ -217,7 +257,12 @@ class SftpManager(private val connection: SshjConnection) {
                 // only the RemoteFile does not. Without this the size
                 // check below raced the in-flight writes and reported
                 // "size does not match" on a complete upload.
-                remote.RemoteFileOutputStream().use { out -> counting.copyTo(out) }
+                val out = if (resume != null) {
+                    remote.RemoteFileOutputStream(resumeFrom)
+                } else {
+                    remote.RemoteFileOutputStream()
+                }
+                out.use { counting.copyTo(it) }
             } finally {
                 remote.close()
             }
@@ -247,6 +292,10 @@ class SftpManager(private val connection: SshjConnection) {
             }
             tempWritten = false
         } catch (e: TransferCancelledException) {
+            // Item T-21: a caller that plans to offer resume
+            // keeps the partial temp; everyone else gets the
+            // long-standing cleanup in the finally below.
+            if (keepTempOnCancel) tempWritten = false
             throw SftpException(SftpError.Cancelled, e)
         } catch (e: SftpException) {
             throw e
@@ -287,6 +336,34 @@ class SftpManager(private val connection: SshjConnection) {
             val parent = RemotePath.parent(normalizedOld)
             val newPath = RemotePath.join(parent, newName) ?: return null
             return normalizedOld to newPath
+        }
+
+        /** The temporary path an upload to [remotePath] uses
+         *  with [tempToken] (item T-21): the caller picks the
+         *  token so it can find the temp again to resume. */
+        fun tempPathFor(remotePath: String, tempToken: String): String? {
+            val normalized = RemotePath.normalize(remotePath) ?: return null
+            val parent = RemotePath.parent(normalized)
+            val targetName = normalized.substringAfterLast('/')
+            return RemotePath.join(parent, ".$targetName.tbpart-$tempToken")
+        }
+
+        /** Skip exactly [bytes] on [input] (a resume prefix);
+         *  InputStream.skip may skip less, so loop — and read
+         *  single bytes when skip refuses (some SAF streams). */
+        internal fun skipFully(input: InputStream, bytes: Long) {
+            var remaining = bytes
+            val buffer = ByteArray(8192)
+            while (remaining > 0) {
+                val skipped = input.skip(remaining)
+                if (skipped > 0) {
+                    remaining -= skipped
+                    continue
+                }
+                val read = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
+                if (read < 0) throw java.io.EOFException("Source ended before the resume offset.")
+                remaining -= read
+            }
         }
     }
 
@@ -329,9 +406,12 @@ class TransferCancelledException : IOException("Transfer cancelled.")
 private class CountingOutputStream(
     out: OutputStream,
     private val onProgress: (Long) -> Unit,
-    private val isCancelled: () -> Boolean
+    private val isCancelled: () -> Boolean,
+    initialCount: Long = 0
 ) : FilterOutputStream(out) {
-    var count: Long = 0
+    /** Total bytes, including any resumed prefix (item T-21):
+     *  progress and the integrity check are always total-based. */
+    var count: Long = initialCount
         private set
 
     override fun write(b: Int) {
@@ -361,9 +441,11 @@ private class CountingOutputStream(
 private class CountingInputStream(
     input: InputStream,
     private val onProgress: (Long) -> Unit,
-    private val isCancelled: () -> Boolean
+    private val isCancelled: () -> Boolean,
+    initialCount: Long = 0
 ) : FilterInputStream(input) {
-    var count: Long = 0
+    /** Total bytes, including any resumed prefix (item T-21). */
+    var count: Long = initialCount
         private set
 
     override fun read(): Int {

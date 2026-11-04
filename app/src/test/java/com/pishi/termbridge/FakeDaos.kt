@@ -53,8 +53,70 @@ class FakeHostDao : HostDao {
         emit()
     }
 
+    override suspend fun touchLastConnected(id: Long, atMs: Long) {
+        rows[id]?.let { rows[id] = it.copy(lastConnectedAt = atMs) }
+        emit()
+    }
+
+    override suspend fun setFavorite(id: Long, favorite: Boolean) {
+        rows[id]?.let { rows[id] = it.copy(favorite = favorite) }
+        emit()
+    }
+
+    override suspend fun countByKeychainEntryId(entryId: Long): Int =
+        rows.values.count { it.keychainEntryId == entryId }
+
+    override suspend fun clearKeychainEntryId(entryId: Long) {
+        for ((id, row) in rows) {
+            if (row.keychainEntryId == entryId) {
+                rows[id] = row.copy(keychainEntryId = null)
+            }
+        }
+        emit()
+    }
+
     /** Test helper: the raw stored row, including its encrypted blob. */
     fun rawRow(id: Long): HostEntity? = rows[id]
+}
+
+/** In-memory KeychainDao for JVM repository tests (not Room, not
+ *  shipped). The unique label index is NOT emulated — duplicate
+ *  rejection is a repository rule and is tested there. */
+class FakeKeychainDao : com.pishi.termbridge.data.KeychainDao {
+    private val rows = mutableMapOf<Long, com.pishi.termbridge.data.KeychainEntryEntity>()
+    private val state = MutableStateFlow<List<com.pishi.termbridge.data.KeychainEntryEntity>>(emptyList())
+    private var nextId = 1L
+
+    private fun emit() {
+        state.value = rows.values.sortedBy { it.label.lowercase() }
+    }
+
+    override fun getAll(): Flow<List<com.pishi.termbridge.data.KeychainEntryEntity>> = state.map { it }
+
+    override suspend fun getById(id: Long): com.pishi.termbridge.data.KeychainEntryEntity? = rows[id]
+
+    override suspend fun getByLabel(label: String): com.pishi.termbridge.data.KeychainEntryEntity? =
+        rows.values.firstOrNull { it.label == label }
+
+    override suspend fun insert(entry: com.pishi.termbridge.data.KeychainEntryEntity): Long {
+        val id = nextId++
+        rows[id] = entry.copy(id = id)
+        emit()
+        return id
+    }
+
+    override suspend fun update(entry: com.pishi.termbridge.data.KeychainEntryEntity) {
+        rows[entry.id] = entry
+        emit()
+    }
+
+    override suspend fun deleteById(id: Long) {
+        rows.remove(id)
+        emit()
+    }
+
+    /** Test helper: the raw stored row, including its encrypted blob. */
+    fun rawRow(id: Long): com.pishi.termbridge.data.KeychainEntryEntity? = rows[id]
 }
 
 /** In-memory CommandButtonDao for JVM tests (not Room, not shipped).
@@ -376,4 +438,91 @@ class FakeTrustedHostKeyDao : TrustedHostKeyDao {
 
     override fun observeAll(): kotlinx.coroutines.flow.Flow<List<TrustedHostKeyEntity>> =
         kotlinx.coroutines.flow.flowOf(rows.values.sortedBy { it.endpoint })
+}
+
+/** In-memory SnippetDao for JVM tests (mirrors FakeCommandButtonDao). */
+class FakeSnippetDao : com.pishi.termbridge.data.SnippetDao {
+    private val snippets = mutableMapOf<Long, com.pishi.termbridge.data.SnippetEntity>()
+    private val steps = mutableMapOf<Long, MutableList<com.pishi.termbridge.data.SnippetStepEntity>>()
+    private val variables = mutableMapOf<Long, MutableList<com.pishi.termbridge.data.SnippetVariableEntity>>()
+    private val state = MutableStateFlow<List<com.pishi.termbridge.data.SnippetEntity>>(emptyList())
+    private var nextId = 1L
+    private var nextChildId = 1L
+
+    private fun emit() {
+        state.value = snippets.values.sortedWith(compareBy({ it.sortOrder }, { it.id }))
+    }
+
+    override fun getAll(): Flow<List<com.pishi.termbridge.data.SnippetEntity>> = state
+
+    override suspend fun getAllOnce(): List<com.pishi.termbridge.data.SnippetEntity> =
+        snippets.values.sortedWith(compareBy({ it.sortOrder }, { it.id }))
+
+    override suspend fun getById(id: Long): com.pishi.termbridge.data.SnippetEntity? = snippets[id]
+
+    override suspend fun getSteps(snippetId: Long): List<com.pishi.termbridge.data.SnippetStepEntity> =
+        (steps[snippetId] ?: emptyList()).sortedWith(compareBy({ it.sortOrder }, { it.id }))
+
+    override suspend fun getVariables(snippetId: Long): List<com.pishi.termbridge.data.SnippetVariableEntity> =
+        (variables[snippetId] ?: emptyList()).sortedBy { it.id }
+
+    override suspend fun insertSnippet(snippet: com.pishi.termbridge.data.SnippetEntity): Long {
+        val id = nextId++
+        snippets[id] = snippet.copy(id = id)
+        emit()
+        return id
+    }
+
+    override suspend fun insertSteps(newSteps: List<com.pishi.termbridge.data.SnippetStepEntity>) {
+        for (step in newSteps) {
+            steps.getOrPut(step.snippetId) { mutableListOf() } += step.copy(id = nextChildId++)
+        }
+    }
+
+    override suspend fun insertVariables(newVariables: List<com.pishi.termbridge.data.SnippetVariableEntity>) {
+        for (variable in newVariables) {
+            variables.getOrPut(variable.snippetId) { mutableListOf() } += variable.copy(id = nextChildId++)
+        }
+    }
+
+    override suspend fun updateSnippet(snippet: com.pishi.termbridge.data.SnippetEntity) {
+        snippets[snippet.id] = snippet
+        emit()
+    }
+
+    override suspend fun deleteSteps(snippetId: Long) {
+        steps.remove(snippetId)
+    }
+
+    override suspend fun deleteVariables(snippetId: Long) {
+        variables.remove(snippetId)
+    }
+
+    override suspend fun deleteSnippet(id: Long) {
+        steps.remove(id)
+        variables.remove(id)
+        snippets.remove(id)
+        emit()
+    }
+
+    override suspend fun replaceChildren(
+        snippetId: Long,
+        newSteps: List<com.pishi.termbridge.data.SnippetStepEntity>,
+        newVariables: List<com.pishi.termbridge.data.SnippetVariableEntity>
+    ) {
+        val committedSteps = newSteps.map { it.copy(id = nextChildId++) }
+        val committedVariables = newVariables.map { it.copy(id = nextChildId++) }
+        steps.remove(snippetId)
+        variables.remove(snippetId)
+        steps[snippetId] = committedSteps.toMutableList()
+        variables[snippetId] = committedVariables.toMutableList()
+    }
+
+    override suspend fun swapSortOrders(
+        first: com.pishi.termbridge.data.SnippetEntity,
+        second: com.pishi.termbridge.data.SnippetEntity
+    ) {
+        updateSnippet(first)
+        updateSnippet(second)
+    }
 }

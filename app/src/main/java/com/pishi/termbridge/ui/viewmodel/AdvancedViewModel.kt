@@ -405,6 +405,20 @@ class AdvancedViewModel(
         }
     }
 
+    /** Item T-20: stop one running forward; the session and
+     *  the other forwards stay up. */
+    fun stopTunnel(configId: Long) {
+        val manager = tunnelManager ?: return
+        val conn = tunnelConnection
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                manager.stop(conn, configId)
+            } catch (_: Exception) {
+            }
+            _activeTunnels.value = manager.getActive()
+        }
+    }
+
     fun stopTunnels() {
         sessionJob?.cancel()
         activeJob?.cancel()

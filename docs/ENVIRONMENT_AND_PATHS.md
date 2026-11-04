@@ -173,3 +173,43 @@ all deliberate:
   sshj-rejection behaviour must be confirmed on a default
   OpenSSH server before any stronger claim is made about
   applied/rejected reporting.
+
+## Addendum, 2026-11-04 — item F-02 (export fallback; root audit)
+
+The env channel's limit, restated: `Session.setEnvVar` is
+honoured only when the server's sshd has a matching
+`AcceptEnv`. Changing sshd is a server-admin (root) action —
+the friend's report behind F-02 was that a basic feature
+"needlessly needs root". The fix is an opt-in fallback, off
+by default:
+
+- Per host, on the Environment screen: "Export fallback for
+  refused variables". It is a device-local consent (like the
+  shell confirmation) and is not carried in backups.
+- It also requires the host's shell to be user-confirmed:
+  typing export lines assumes the shell dialect exactly like
+  command buttons do.
+- When both hold and the server refuses variables, the app
+  types one export line per refused variable into the fresh
+  shell, before the initial `cd`. Rendering is
+  domain/ExportCommand: the shell's own quoting; values with
+  any control character are refused (never typed); cmd.exe
+  also refuses `%` and `"`. The lines are visible on screen
+  and remain in the shell's history — the Settings hint says
+  so, values included — and the session's environment section
+  lists the fallback-applied names separately (names only,
+  as everywhere).
+- Prompt 09's "deliberately no fallback" decision is
+  superseded by the owner's F-02 order for this opt-in path
+  only; `TerminalSession.start` itself still has no fallback.
+
+Root-assumption audit (grep-verified over app/src/main,
+2026-11-04): the only `sudo` occurrence in the codebase is
+the RiskyCommand DETECTOR's regex (it flags risky commands;
+it assumes nothing). The initial `cd` runs in the user's own
+login shell. SFTP lists, reads and writes paths the server
+returns for the login's own permissions — no path assumes a
+privileged account. Local/remote forwarding binds exactly
+the address and port the user configured, and a listen
+failure surfaces as an error instead of a silent workaround.
+No flow requests, assumes or escalates to root.

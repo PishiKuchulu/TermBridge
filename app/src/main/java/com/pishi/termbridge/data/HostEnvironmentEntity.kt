@@ -40,7 +40,12 @@ data class HostSettingsEntity(
     val remoteWorkingDirectory: String,
     val localDirectoryUri: String?,
     val remoteShell: String,
-    val shellConfirmed: Boolean = false
+    val shellConfirmed: Boolean = false,
+    /** Item F-02 opt-in (MIGRATION_8_9 DEFAULT 0). */
+    val envExportFallback: Boolean = false,
+    /** Item T-03 opt-ins (MIGRATION_9_10 DEFAULT 0). */
+    val sessionLogEnabled: Boolean = false,
+    val sessionLogInBackup: Boolean = false
 )
 
 @Entity(

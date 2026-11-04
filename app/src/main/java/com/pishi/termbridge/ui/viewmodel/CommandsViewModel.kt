@@ -28,7 +28,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 class CommandsViewModel(
     private val hostRepository: HostRepository,
-    private val commandRepository: CommandRepository
+    private val commandRepository: CommandRepository,
+    private val snippetRepository: com.pishi.termbridge.data.SnippetRepository? = null
 ) : ViewModel() {
     val hosts: StateFlow<List<HostProfile>> = hostRepository.getHosts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -36,9 +37,18 @@ class CommandsViewModel(
     private val _selectedHostId = MutableStateFlow<Long?>(null)
     val selectedHostId: StateFlow<Long?> = _selectedHostId.asStateFlow()
 
+    /** True while the global-snippets pseudo-host is selected (item T-02). */
+    val isGlobalSelected: Boolean
+        get() = _selectedHostId.value == com.pishi.termbridge.data.GLOBAL_HOST_ID
+
     val buttons: StateFlow<List<CommandButton>> = _selectedHostId
         .flatMapLatest { hostId ->
-            if (hostId == null) emptyFlow() else commandRepository.getButtons(hostId)
+            when {
+                hostId == null -> emptyFlow()
+                hostId == com.pishi.termbridge.data.GLOBAL_HOST_ID ->
+                    snippetRepository?.getSnippets() ?: emptyFlow()
+                else -> commandRepository.getButtons(hostId)
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -62,7 +72,11 @@ class CommandsViewModel(
     fun startEdit(id: Long) {
         _error.value = null
         viewModelScope.launch {
-            _formButton.value = commandRepository.getButton(id)
+            _formButton.value = if (isGlobalSelected) {
+                snippetRepository?.getSnippet(id)
+            } else {
+                commandRepository.getButton(id)
+            }
         }
     }
 
@@ -82,7 +96,11 @@ class CommandsViewModel(
     fun saveButton(button: CommandButton) {
         viewModelScope.launch {
             try {
-                commandRepository.saveButton(button)
+                if (button.hostId == com.pishi.termbridge.data.GLOBAL_HOST_ID) {
+                    snippetRepository?.saveSnippet(button)
+                } else {
+                    commandRepository.saveButton(button)
+                }
                 _error.value = null
                 _formButton.value = null
             } catch (e: CommandRepositoryException) {
@@ -96,7 +114,11 @@ class CommandsViewModel(
     fun deleteButton(id: Long) {
         viewModelScope.launch {
             try {
-                commandRepository.deleteButton(id)
+                if (isGlobalSelected) {
+                    snippetRepository?.deleteSnippet(id)
+                } else {
+                    commandRepository.deleteButton(id)
+                }
             } catch (e: Exception) {
                 _error.value = "Could not delete the button. Please try again."
             }
@@ -106,7 +128,11 @@ class CommandsViewModel(
     fun duplicateButton(id: Long) {
         viewModelScope.launch {
             try {
-                commandRepository.duplicateButton(id)
+                if (isGlobalSelected) {
+                    snippetRepository?.duplicateSnippet(id)
+                } else {
+                    commandRepository.duplicateButton(id)
+                }
             } catch (e: Exception) {
                 _error.value = "Could not duplicate the button. Please try again."
             }
@@ -116,7 +142,11 @@ class CommandsViewModel(
     fun moveButton(id: Long, up: Boolean) {
         viewModelScope.launch {
             try {
-                commandRepository.moveButton(id, up)
+                if (isGlobalSelected) {
+                    snippetRepository?.moveSnippet(id, up)
+                } else {
+                    commandRepository.moveButton(id, up)
+                }
             } catch (e: Exception) {
                 _error.value = "Could not reorder the button. Please try again."
             }
@@ -126,12 +156,13 @@ class CommandsViewModel(
 
 class CommandsViewModelFactory(
     private val hostRepository: HostRepository,
-    private val commandRepository: CommandRepository
+    private val commandRepository: CommandRepository,
+    private val snippetRepository: com.pishi.termbridge.data.SnippetRepository? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(CommandsViewModel::class.java)) {
-            return CommandsViewModel(hostRepository, commandRepository) as T
+            return CommandsViewModel(hostRepository, commandRepository, snippetRepository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

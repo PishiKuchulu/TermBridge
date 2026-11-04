@@ -14,6 +14,10 @@ import com.pishi.termbridge.domain.EnvironmentValidator
 import com.pishi.termbridge.domain.CommandRunner
 import com.pishi.termbridge.domain.CommandTemplate
 import com.pishi.termbridge.domain.HostProfile
+import com.pishi.termbridge.domain.LatchState
+import com.pishi.termbridge.domain.ModifierLatch
+import com.pishi.termbridge.domain.SpecialKey
+import com.pishi.termbridge.domain.TerminalKeyEncoder
 import com.pishi.termbridge.domain.PreparedCommand
 import com.pishi.termbridge.domain.RiskyCommand
 import com.pishi.termbridge.domain.SequenceProgress
@@ -21,6 +25,7 @@ import com.pishi.termbridge.domain.TerminalSender
 import com.pishi.termbridge.domain.wipe
 import com.pishi.termbridge.terminal.TerminalSession
 import com.pishi.termbridge.terminal.TerminalSnapshot
+import com.pishi.termbridge.terminal.asText
 import com.pishi.termbridge.transport.HostKeyDecisionHandler
 import com.pishi.termbridge.transport.PendingTrust
 import com.pishi.termbridge.transport.SshConnection
@@ -99,7 +104,11 @@ data class EnvStatus(
     val configuredNames: List<String> = emptyList(),
     val appliedNames: List<String> = emptyList(),
     val rejectedNames: List<String> = emptyList(),
-    val workingDirectory: String? = null
+    val workingDirectory: String? = null,
+    /** Item F-02: names applied by the typed export fallback
+     *  (a subset of [appliedNames], shown separately so the
+     *  user can tell HOW they were set). */
+    val fallbackNames: List<String> = emptyList()
 )
 
 class SessionViewModel(
@@ -107,8 +116,137 @@ class SessionViewModel(
     private val commandRepository: CommandRepository,
     private val environmentRepository: HostEnvironmentRepository,
     private val appSettings: com.pishi.termbridge.settings.AppSettingsStore? = null,
-    private val connectionLog: com.pishi.termbridge.settings.ConnectionLogStore? = null
+    private val connectionLog: com.pishi.termbridge.settings.ConnectionLogStore? = null,
+    customThemeRepository: com.pishi.termbridge.settings.CustomThemeRepository? = null,
+    private val keychainRepository: com.pishi.termbridge.data.KeychainRepository? = null,
+    private val snippetRepository: com.pishi.termbridge.data.SnippetRepository? = null,
+    private val transcriptStore: com.pishi.termbridge.settings.TranscriptStorage? = null,
+    private val commandHistoryStore: com.pishi.termbridge.settings.CommandHistoryStore? = null
 ) : ViewModel() {
+    /** User-defined colour schemes (item T-08), for resolution. */
+    val customThemes: kotlinx.coroutines.flow.StateFlow<List<com.pishi.termbridge.domain.TerminalTheme>> =
+        customThemeRepository?.themes
+            ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+    /** Ephemeral host id for quick connect (item T-04); never a Room row. */
+    private val QUICK_HOST_ID = -1L
+
+    // Item T-11: autocomplete state (tracker + suggestions).
+    private val inputTracker = com.pishi.termbridge.domain.InputLineTracker()
+    private val _suggestions = MutableStateFlow<List<String>>(emptyList())
+    val suggestions: StateFlow<List<String>> = _suggestions.asStateFlow()
+    private val _historyImportMessage = MutableStateFlow<String?>(null)
+    val historyImportMessage: StateFlow<String?> = _historyImportMessage.asStateFlow()
+
+    /** Item T-11: the history files, read over the exec
+     *  channel only. Missing files are silent (2>/dev/null). */
+    private val HISTORY_IMPORT_COMMAND =
+        "cat ~/.bash_history ~/.zsh_history " +
+            "~/.local/share/fish/fish_history 2>/dev/null | tail -n 4000"
+
+    // Item T-16: the detected remote OS (display text), or
+    // null when not probed / not detectable.
+    private val _detectedOs = MutableStateFlow<String?>(null)
+    val detectedOs: StateFlow<String?> = _detectedOs.asStateFlow()
+
+    /**
+     * Item T-16: probes the remote OS over the exec channel —
+     * never typed into the shell. Runs on demand, and after a
+     * connect only when the user enabled it in settings.
+     * Failure is a display outcome, never a session error.
+     */
+    fun detectOs() {
+        val channel = connection as? com.pishi.termbridge.transport.SshExecChannel
+            ?: return
+        viewModelScope.launch {
+            val detected = try {
+                val posix = com.pishi.termbridge.domain.OsProbe.parsePosix(
+                    channel.execOnce(
+                        com.pishi.termbridge.domain.OsProbe.POSIX_COMMAND, 10_000
+                    )
+                )
+                posix ?: com.pishi.termbridge.domain.OsProbe.parseWindows(
+                    channel.execOnce(
+                        com.pishi.termbridge.domain.OsProbe.WINDOWS_COMMAND, 10_000
+                    )
+                )
+            } catch (_: Exception) {
+                null
+            }
+            _detectedOs.value = detected?.display ?: "Unknown OS"
+        }
+    }
+
+    init {
+        // Imported/recorded history refreshes open suggestions.
+        val store = commandHistoryStore
+        if (store != null) {
+            viewModelScope.launch {
+                store.entries.collect { refreshSuggestions() }
+            }
+        }
+    }
+
+    private fun autocompleteOn(): Boolean =
+        settings.value.autocompleteEnabled && commandHistoryStore != null
+
+    private fun refreshSuggestions() {
+        _suggestions.value = if (autocompleteOn()) {
+            com.pishi.termbridge.domain.Autocomplete.suggestions(
+                inputTracker.currentLine,
+                commandHistoryStore!!.entries.value
+            )
+        } else {
+            emptyList()
+        }
+    }
+
+    private fun submitTrackedLine() {
+        val line = inputTracker.submit()
+        if (autocompleteOn()) commandHistoryStore?.record(line)
+        refreshSuggestions()
+    }
+
+    /** Item T-11: types the remainder of a chosen suggestion. */
+    fun applySuggestion(suggestion: String) {
+        val suffix = suggestion.removePrefix(inputTracker.currentLine)
+        if (suffix.isNotEmpty()) sendText(suffix)
+    }
+
+    /**
+     * Item T-11: reads the remote shell history files over a
+     * SEPARATE exec channel on the live connection (never the
+     * interactive shell), after the user's explicit consent in
+     * the UI. Lines pass ShellHistoryImport + CommandAdmission,
+     * so secret-looking lines never reach the store.
+     */
+    fun importShellHistory() {
+        val store = commandHistoryStore ?: return
+        val channel = connection as? com.pishi.termbridge.transport.SshExecChannel
+        if (channel == null) {
+            _historyImportMessage.value = "History import needs a live session."
+            return
+        }
+        _historyImportMessage.value = "Importing shell history…"
+        viewModelScope.launch {
+            try {
+                val raw = channel.execOnce(HISTORY_IMPORT_COMMAND, 15_000)
+                val lines = com.pishi.termbridge.domain.ShellHistoryImport.parse(raw)
+                val added = store.recordImported(lines)
+                _historyImportMessage.value =
+                    "Imported $added new commands (${lines.size} usable lines read)."
+                refreshSuggestions()
+            } catch (_: Exception) {
+                _historyImportMessage.value = "Shell history import failed."
+            }
+        }
+    }
+
+    // Item T-03: transcript capture state (all null/0 = off).
+    private var transcriptTarget: Long? = null
+    private var transcriptLinesSeen = 0
+    private var transcriptChannel: kotlinx.coroutines.channels.Channel<String>? = null
+    private var transcriptJob: Job? = null
+
     private var sessionStartedAt = 0L
     private var sessionHostName = ""
 
@@ -260,19 +398,10 @@ class SessionViewModel(
         val hostId = _uiState.value.selectedHostId
             ?: _uiState.value.connectedHost?.id
             ?: return
-        connectJob?.cancel()
-        // Review #2 F-05: a reconnect (or a retry after a failure)
-        // must not orphan the previous authenticated transport.
-        closeLiveSession()
-        _uiState.value = _uiState.value.copy(
-            status = SessionStatus.CONNECTING,
-            errorMessage = null,
-            pendingTrust = null
-        )
+        prepareConnect()
         connectJob = viewModelScope.launch {
             var credentialBytes: ByteArray? = null
             var passphraseChars: CharArray? = null
-            var envValues: List<EnvVarValue> = emptyList()
             try {
                 val profile = repository.getHost(hostId)
                 sessionHostName = profile?.name ?: ""
@@ -296,158 +425,16 @@ class SessionViewModel(
                 } else {
                     null
                 }
-                val conn = transport.connect(
-                    SshConnectionRequest(
-                        profile = profile,
-                        credential = credentialBytes,
-                        passphrase = passphraseChars,
-                        keepAliveSeconds = settings.value.keepAliveSeconds
-                    ),
-                    decisionHandler
-                )
-                connection = conn
-                // Prompt 06: open a real shell channel on the
-                // authenticated transport. If the connection is not
-                // an sshj connection (it always is in production),
-                // the terminal cannot start — fail, don't fake it.
-                val sshjConn = conn as? SshjConnection
-                if (sshjConn == null) {
-                    conn.disconnect()
-                    connection = null
-                    _uiState.value = _uiState.value.copy(
-                        status = SessionStatus.FAILED,
-                        errorMessage = "Terminal could not start on this connection."
-                    )
-                    return@launch
-                }
-                val prefs = settings.value
-                val terminal = TerminalSession(
-                    sshjConn, 80, 24,
-                    terminalType = prefs.terminalType,
-                    scrollbackLines = prefs.scrollbackLines
-                )
-                terminal.onClosed = { error ->
-                    // Runs on the terminal's IO threads: atomic update.
-                    if (sessionStartedAt > 0L) {
-                        logEntry(
-                            sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.CLOSED,
-                            durationMs = System.currentTimeMillis() - sessionStartedAt
-                        )
-                        sessionStartedAt = 0L
-                    }
-                    _uiState.update {
-                        if (it.status == SessionStatus.CONNECTED) {
-                            it.copy(
-                                status = SessionStatus.FAILED,
-                                errorMessage = if (error == null) {
-                                    "Shell closed by the server."
-                                } else {
-                                    "Connection lost."
-                                }
-                            )
-                        } else {
-                            it
-                        }
-                    }
-                }
-                terminalSession = terminal
-                launch {
-                    terminal.snapshot.collect { _terminalSnapshot.value = it }
-                }
-                // Prompt 09: env vars are requested with the shell
-                // (setEnvVar before startShell, inside
-                // TerminalSession.start), and the initial working
-                // directory is one visible `cd` immediately after
-                // the shell starts, before CONNECTED is set — so
-                // it is the first input the shell sees. Neither
-                // mechanism touches command buttons: buttons are
-                // user-authored exact text (prompt 08 guarantee).
-                val decrypted = environmentRepository.loadEnvVarsForConnection(hostId)
-                envValues = decrypted.values
-                val settings = environmentRepository.getSettingsOnce(hostId)
-                // Security fix 16 (H1): buttons are quoted and
-                // classified for THIS host's shell, never for an
-                // assumed POSIX shell.
-                _connectedShell.value = settings?.remoteShell
-                    ?: com.pishi.termbridge.domain.RemoteShell.POSIX
-                _connectedShellConfirmed.value = settings?.shellConfirmed ?: false
-                val envPairs = envValues.map { it.name to String(it.value) }
-                terminal.start(envPairs) { result ->
-                    _envStatus.value = EnvStatus(
-                        configuredNames = envPairs.map { it.first } +
-                            decrypted.undecryptableNames,
-                        appliedNames = result.appliedNames,
-                        rejectedNames = result.rejectedNames +
-                            decrypted.undecryptableNames,
-                        workingDirectory = null
-                    )
-                }
-                val workingDir = settings?.remoteWorkingDirectory?.takeIf { it.isNotBlank() }
-                if (workingDir != null && settings != null) {
-                    // Re-validate at the point of use (review #2 F-03):
-                    // a value stored before the control-character rule
-                    // existed must not be typed into the shell.
-                    val safeCd = try {
-                        EnvironmentValidator.canonicalDirectory(workingDir, settings.remoteShell)
-                            ?.let { CdCommand.render(it, settings.remoteShell) }
-                    } catch (_: IllegalArgumentException) {
-                        null
-                    }
-                    if (safeCd != null) {
-                        terminal.sendText(safeCd)
-                        terminal.sendEnter()
-                        _envStatus.value = (_envStatus.value ?: EnvStatus()).copy(
-                            workingDirectory = workingDir
-                        )
-                    }
-                }
-                sessionStartedAt = System.currentTimeMillis()
-                logEntry(profile.name, com.pishi.termbridge.domain.ConnectionOutcome.CONNECTED)
-                _uiState.value = _uiState.value.copy(
-                    status = SessionStatus.CONNECTED,
-                    connectedHost = profile,
-                    errorMessage = null
-                )
-                // Prompt 08: load this host's buttons for the
-                // session's buttons area. Buttons are per-host, so
-                // a different host's buttons are never offered here.
-                buttonsJob?.cancel()
-                // viewModelScope, not a child of connectJob: the
-                // buttons flow must outlive the connect attempt
-                // itself and be cancelled only on disconnect.
-                buttonsJob = viewModelScope.launch {
-                    commandRepository.getButtons(profile.id).collect {
-                        _commandButtons.value = it
-                    }
-                }
+                startConnection(profile, credentialBytes, passphraseChars)
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // A superseded or cancelled attempt must not write
-                // FAILED over the state of the attempt that replaced
-                // it; whoever cancelled owns the state.
                 throw e
-            } catch (e: SshTransportException) {
-                logEntry(
-                    sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.FAILED,
-                    detail = e.userFacingMessage()
-                )
-                closeLiveSession()
-                _uiState.update {
-                    it.copy(
-                        status = SessionStatus.FAILED,
-                        errorMessage = e.userFacingMessage()
-                    )
-                }
             } catch (e: Exception) {
+                // Resolution failed before any transport existed
+                // (e.g. the stored credential no longer decrypts).
                 logEntry(
                     sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.FAILED,
                     detail = "Connection failed."
                 )
-                // Generic only — repository/transport messages are
-                // already secret-free, but this is the second net.
-                // Review #2 F-05: a failure AFTER authentication
-                // (e.g. the shell could not start) must close the
-                // already-authenticated transport.
-                closeLiveSession()
                 _uiState.update {
                     it.copy(
                         status = SessionStatus.FAILED,
@@ -457,8 +444,377 @@ class SessionViewModel(
             } finally {
                 credentialBytes?.wipe()
                 passphraseChars?.wipe()
-                envValues.forEach { it.value.wipe() }
             }
+        }
+    }
+
+    /** Cancel any attempt, close any live session, show CONNECTING. */
+    private fun prepareConnect() {
+        connectJob?.cancel()
+        // Review #2 F-05: a reconnect (or a retry after a failure)
+        // must not orphan the previous authenticated transport.
+        closeLiveSession()
+        _uiState.value = _uiState.value.copy(
+            status = SessionStatus.CONNECTING,
+            errorMessage = null,
+            pendingTrust = null
+        )
+    }
+
+    /**
+     * True quick connect (item T-04): dial an UNSAVED host from a
+     * parsed quick-connect line. The credential arrives as a
+     * [com.pishi.termbridge.domain.CredentialInput] collected by
+     * the UI in its own field — never inside the free-text line —
+     * and nothing is written to the database: no host row, no
+     * stored credential. Command buttons and environment
+     * settings are per-host features and do not apply (their
+     * lookups key on the ephemeral id and return empty).
+     */
+    fun quickConnect(
+        target: com.pishi.termbridge.domain.QuickConnectTarget,
+        username: String,
+        credential: com.pishi.termbridge.domain.CredentialInput
+    ) {
+        val user = username.ifBlank { target.username ?: "" }
+        val authType = when (credential) {
+            is com.pishi.termbridge.domain.CredentialInput.Password -> AuthType.PASSWORD
+            is com.pishi.termbridge.domain.CredentialInput.PrivateKey -> AuthType.PRIVATE_KEY
+        }
+        val profile = HostProfile(
+            id = QUICK_HOST_ID,
+            name = if (user.isBlank()) target.host else "$user@${target.host}",
+            hostname = target.host,
+            port = target.port,
+            username = user,
+            authType = authType
+        )
+        val credentialBytes: ByteArray
+        val passphraseChars: CharArray?
+        when (credential) {
+            is com.pishi.termbridge.domain.CredentialInput.Password -> {
+                credentialBytes = String(credential.password).toByteArray(Charsets.UTF_8)
+                credential.password.wipe()
+                passphraseChars = null
+            }
+            is com.pishi.termbridge.domain.CredentialInput.PrivateKey -> {
+                credentialBytes = credential.keyPem.toByteArray(Charsets.UTF_8)
+                passphraseChars = credential.passphrase
+            }
+        }
+        startQuick(profile, credentialBytes, passphraseChars)
+    }
+
+    /**
+     * Quick connect with a keychain entry (item T-04 + T-01):
+     * the entry's material is decrypted for this one connection
+     * and wiped with it; the passphrase (for key entries) is
+     * asked by the UI, never stored.
+     */
+    fun quickConnectWithKeychain(
+        target: com.pishi.termbridge.domain.QuickConnectTarget,
+        username: String,
+        entryId: Long,
+        passphrase: String
+    ) {
+        val repo = keychainRepository ?: return
+        viewModelScope.launch {
+            val entry = repo.getEntry(entryId) ?: return@launch
+            val material = repo.loadMaterial(entryId) ?: return@launch
+            val user = username.ifBlank { target.username ?: "" }
+            val profile = HostProfile(
+                id = QUICK_HOST_ID,
+                name = if (user.isBlank()) target.host else "$user@${target.host}",
+                hostname = target.host,
+                port = target.port,
+                username = user,
+                authType = entry.kind
+            )
+            val passphraseChars = if (
+                entry.kind == AuthType.PRIVATE_KEY && passphrase.isNotEmpty()
+            ) {
+                passphrase.toCharArray()
+            } else {
+                null
+            }
+            startQuick(profile, material, passphraseChars)
+        }
+    }
+
+    private fun startQuick(
+        profile: HostProfile,
+        credentialBytes: ByteArray,
+        passphraseChars: CharArray?
+    ) {
+        sessionHostName = profile.name
+        prepareConnect()
+        connectJob = viewModelScope.launch {
+            startConnection(profile, credentialBytes, passphraseChars)
+        }
+    }
+
+    private suspend fun startConnection(
+        profile: HostProfile,
+        credentialBytes: ByteArray,
+        passphraseChars: CharArray?
+    ) {
+        var envValues: List<EnvVarValue> = emptyList()
+        try {
+            val conn = transport.connect(
+                SshConnectionRequest(
+                    profile = profile,
+                    credential = credentialBytes,
+                    passphrase = passphraseChars,
+                    keepAliveSeconds = settings.value.keepAliveSeconds,
+                    keepAliveMaxMisses = settings.value.keepAliveMaxMisses
+                ),
+                decisionHandler
+            )
+            connection = conn
+            // Prompt 06: open a real shell channel on the
+            // authenticated transport. If the connection is not
+            // an sshj connection (it always is in production),
+            // the terminal cannot start — fail, don't fake it.
+            val sshjConn = conn as? SshjConnection
+            if (sshjConn == null) {
+                conn.disconnect()
+                connection = null
+                _uiState.value = _uiState.value.copy(
+                    status = SessionStatus.FAILED,
+                    errorMessage = "Terminal could not start on this connection."
+                )
+                return
+            }
+            val prefs = settings.value
+            val terminal = TerminalSession(
+                sshjConn, 80, 24,
+                terminalType = prefs.terminalType,
+                scrollbackLines = prefs.scrollbackLines
+            )
+            terminal.onClosed = { error ->
+                // Runs on the terminal's IO threads: atomic update.
+                if (sessionStartedAt > 0L) {
+                    logEntry(
+                        sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.CLOSED,
+                        durationMs = System.currentTimeMillis() - sessionStartedAt
+                    )
+                    sessionStartedAt = 0L
+                }
+                _uiState.update {
+                    if (it.status == SessionStatus.CONNECTED) {
+                        it.copy(
+                            status = SessionStatus.FAILED,
+                            errorMessage = if (error == null) {
+                                "Shell closed by the server."
+                            } else {
+                                "Connection lost."
+                            }
+                        )
+                    } else {
+                        it
+                    }
+                }
+            }
+            terminalSession = terminal
+            // Was a bare `launch` inside the old connect coroutine;
+            // startConnection is a suspend fun, so scope it explicitly.
+            viewModelScope.launch {
+                terminal.snapshot.collect { snap ->
+                    _terminalSnapshot.value = snap
+                    // Item T-03: transcript capture — new lines
+                    // only, scrubbed before they queue. Line-count
+                    // based: a line is recorded when it scrolls
+                    // into history; the final screenful and lines
+                    // trimmed by the parser's own scrollback cap
+                    // are not captured (documented limit).
+                    val target = transcriptTarget
+                    if (target != null) {
+                        val total = snap.lines.size
+                        if (total > transcriptLinesSeen) {
+                            val fresh = snap.lines.subList(transcriptLinesSeen, total)
+                            transcriptLinesSeen = total
+                            val text = fresh.joinToString("\n") { line ->
+                                com.pishi.termbridge.domain.SecretRedactor
+                                    .scrubFreeText(line.asText())
+                            } + "\n"
+                            transcriptChannel?.trySend(text)
+                        } else if (total < transcriptLinesSeen) {
+                            transcriptLinesSeen = total
+                        }
+                    }
+                }
+            }
+            // Prompt 09: env vars are requested with the shell
+            // (setEnvVar before startShell, inside
+            // TerminalSession.start), and the initial working
+            // directory is one visible `cd` immediately after
+            // the shell starts, before CONNECTED is set — so
+            // it is the first input the shell sees. Neither
+            // mechanism touches command buttons: buttons are
+            // user-authored exact text (prompt 08 guarantee).
+            val decrypted = environmentRepository.loadEnvVarsForConnection(profile.id)
+            envValues = decrypted.values
+            val settings = environmentRepository.getSettingsOnce(profile.id)
+            // Security fix 16 (H1): buttons are quoted and
+            // classified for THIS host's shell, never for an
+            // assumed POSIX shell.
+            _connectedShell.value = settings?.remoteShell
+                ?: com.pishi.termbridge.domain.RemoteShell.POSIX
+            _connectedShellConfirmed.value = settings?.shellConfirmed ?: false
+            // Item T-03: start the transcript when this host
+            // opted in (saved hosts only — never quick connect).
+            if (settings?.sessionLogEnabled == true && profile.id > 0) {
+                startTranscript(profile)
+            }
+            val envPairs = envValues.map { it.name to String(it.value) }
+            var envResult: com.pishi.termbridge.domain.EnvApplyResult? = null
+            terminal.start(envPairs) { result ->
+                envResult = result
+                _envStatus.value = EnvStatus(
+                    configuredNames = envPairs.map { it.first } +
+                        decrypted.undecryptableNames,
+                    appliedNames = result.appliedNames,
+                    rejectedNames = result.rejectedNames +
+                        decrypted.undecryptableNames,
+                    workingDirectory = null
+                )
+            }
+            // Item F-02: the opt-in shell-export fallback. The
+            // server refused these names through the env channel
+            // (its sshd has no matching AcceptEnv — a server-admin
+            // setting). With the per-host toggle on AND the shell
+            // user-confirmed, type one visible export line per
+            // refused variable instead, before the initial cd.
+            // Without either condition nothing is typed and the
+            // names stay in the rejected list, exactly as before.
+            val capturedEnv = envResult
+            if (capturedEnv != null && settings != null &&
+                settings.envExportFallback && settings.shellConfirmed &&
+                capturedEnv.rejectedNames.isNotEmpty()
+            ) {
+                val valuesByName = envValues.associate {
+                    it.name to String(it.value)
+                }
+                val plan = com.pishi.termbridge.domain.ExportCommand.planFallback(
+                    valuesByName, capturedEnv.rejectedNames, settings.remoteShell
+                )
+                for ((_, line) in plan.lines) {
+                    terminal.sendText(line)
+                    terminal.sendEnter()
+                }
+                if (plan.lines.isNotEmpty()) {
+                    val fallbackNames = plan.lines.map { it.first }
+                    val current = _envStatus.value ?: EnvStatus()
+                    _envStatus.value = current.copy(
+                        appliedNames = current.appliedNames + fallbackNames,
+                        rejectedNames = current.rejectedNames
+                            .filter { it !in fallbackNames },
+                        fallbackNames = fallbackNames
+                    )
+                }
+            }
+            val workingDir = settings?.remoteWorkingDirectory?.takeIf { it.isNotBlank() }
+            if (workingDir != null && settings != null) {
+                // Re-validate at the point of use (review #2 F-03):
+                // a value stored before the control-character rule
+                // existed must not be typed into the shell.
+                val safeCd = try {
+                    EnvironmentValidator.canonicalDirectory(workingDir, settings.remoteShell)
+                        ?.let { CdCommand.render(it, settings.remoteShell) }
+                } catch (_: IllegalArgumentException) {
+                    null
+                }
+                if (safeCd != null) {
+                    terminal.sendText(safeCd)
+                    terminal.sendEnter()
+                    _envStatus.value = (_envStatus.value ?: EnvStatus()).copy(
+                        workingDirectory = workingDir
+                    )
+                }
+            }
+            sessionStartedAt = System.currentTimeMillis()
+            logEntry(profile.name, com.pishi.termbridge.domain.ConnectionOutcome.CONNECTED)
+            // Item T-22: stamp the last-connected time for the
+            // hosts list. Bookkeeping only — a failure here must
+            // never affect the session, and a quick-connect host
+            // (negative id) has no row to stamp.
+            if (profile.id > 0) {
+                try {
+                    repository.touchLastConnected(profile.id)
+                } catch (e: Exception) {
+                    // Deliberately ignored: see above.
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                status = SessionStatus.CONNECTED,
+                connectedHost = profile,
+                errorMessage = null
+            )
+            // Item T-16: auto-detect only when the user turned
+            // it on (default off); manual detection is in the UI.
+            // (this.settings is the AppSettings flow — the local
+            // `settings` here is the host environment settings.)
+            if (this.settings.value.detectOsOnConnect) {
+                detectOs()
+            }
+            // Prompt 08: load this host's buttons for the
+            // session's buttons area. Another host's buttons are
+            // never offered here; global snippets (T-02) are the
+            // one deliberate exception, merged below.
+            buttonsJob?.cancel()
+            // viewModelScope, not a child of connectJob: the
+            // buttons flow must outlive the connect attempt
+            // itself and be cancelled only on disconnect.
+            buttonsJob = viewModelScope.launch {
+                // Per-host buttons first, then the global
+                // snippets (item T-02), which every session —
+                // including a quick-connect one — offers.
+                val globals = snippetRepository?.getSnippets()
+                    ?: kotlinx.coroutines.flow.flowOf(emptyList())
+                kotlinx.coroutines.flow.combine(
+                    commandRepository.getButtons(profile.id), globals
+                ) { own, global -> own + global }.collect {
+                    _commandButtons.value = it
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // A superseded or cancelled attempt must not write
+            // FAILED over the state of the attempt that replaced
+            // it; whoever cancelled owns the state.
+            throw e
+        } catch (e: SshTransportException) {
+            logEntry(
+                sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.FAILED,
+                detail = e.userFacingMessage()
+            )
+            closeLiveSession()
+            _uiState.update {
+                it.copy(
+                    status = SessionStatus.FAILED,
+                    errorMessage = e.userFacingMessage()
+                )
+            }
+        } catch (e: Exception) {
+            logEntry(
+                sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.FAILED,
+                detail = "Connection failed."
+            )
+            // Generic only — repository/transport messages are
+            // already secret-free, but this is the second net.
+            // Review #2 F-05: a failure AFTER authentication
+            // (e.g. the shell could not start) must close the
+            // already-authenticated transport.
+            closeLiveSession()
+            _uiState.update {
+                it.copy(
+                    status = SessionStatus.FAILED,
+                    errorMessage = "Connection failed. Please try again."
+                )
+            }
+        } finally {
+            credentialBytes.wipe()
+            passphraseChars?.wipe()
+            envValues.forEach { it.value.wipe() }
         }
     }
 
@@ -492,7 +848,52 @@ class SessionViewModel(
         _uiState.value = _uiState.value.copy(status = SessionStatus.IDLE, errorMessage = null)
     }
 
+    /** Item T-03: opens the transcript queue for [profile] and
+     *  writes the session header. The consumer is the ONLY
+     *  writer, so appends stay ordered; text arrives already
+     *  scrubbed from the snapshot collector. */
+    private fun startTranscript(profile: com.pishi.termbridge.domain.HostProfile) {
+        val store = transcriptStore ?: return
+        stopTranscript()
+        val channel = kotlinx.coroutines.channels.Channel<String>(
+            kotlinx.coroutines.channels.Channel.UNLIMITED
+        )
+        transcriptChannel = channel
+        transcriptLinesSeen = 0
+        transcriptTarget = profile.id
+        transcriptJob = viewModelScope.launch(Dispatchers.IO) {
+            for (chunk in channel) {
+                try {
+                    store.append(profile.id, chunk)
+                } catch (_: Exception) {
+                    // A full disk must never break the session;
+                    // the transcript just stops growing.
+                }
+            }
+        }
+        channel.trySend(
+            "=== TermBridge session: ${profile.name} " +
+                "(${profile.username}@${profile.hostname}:${profile.port}) " +
+                "started ${java.time.Instant.now()} ===\n"
+        )
+    }
+
+    /** Item T-03: closes the transcript queue (the consumer
+     *  drains what is queued, then ends). */
+    private fun stopTranscript() {
+        transcriptTarget = null
+        transcriptChannel?.close()
+        transcriptChannel = null
+        transcriptJob = null
+        transcriptLinesSeen = 0
+    }
+
     fun disconnect() {
+        stopTranscript()
+        inputTracker.reset()
+        _suggestions.value = emptyList()
+        _historyImportMessage.value = null
+        _detectedOs.value = null
         if (_uiState.value.status == SessionStatus.CONNECTED && sessionStartedAt > 0L) {
             logEntry(
                 sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.CLOSED,
@@ -502,6 +903,9 @@ class SessionViewModel(
         }
         connectJob?.cancel()
         stopSequence()
+        // A latched modifier must never leak into the next session.
+        keyLatch.clear()
+        publishLatch()
         buttonsJob?.cancel()
         _commandButtons.value = emptyList()
         _actionButton.value = null
@@ -575,6 +979,10 @@ class SessionViewModel(
         if (_uiState.value.status != SessionStatus.CONNECTED || terminalSession == null) {
             return
         }
+        // Item T-11: a button writes to the shell line itself;
+        // the typed-line tracker no longer describes it.
+        inputTracker.reset()
+        refreshSuggestions()
         // Remediation phase 1 — the execution gate, FIRST,
         // before the risky dialog and before any submission,
         // in every mode (insert counts: inserted text becomes
@@ -684,18 +1092,221 @@ class SessionViewModel(
     )
 
     // Terminal input — raw bytes to the shell, not commands.
-    fun sendText(text: String) = terminalSession?.sendText(text)
-    fun sendEnter() = terminalSession?.sendEnter()
-    fun sendCtrlC() = terminalSession?.sendCtrlC()
-    fun sendCtrlD() = terminalSession?.sendCtrlD()
-    fun sendTab() = terminalSession?.sendTab()
-    fun sendEscape() = terminalSession?.sendEscape()
-    fun sendBackspace() = terminalSession?.sendByte(0x7F)
-    fun sendArrowUp() = terminalSession?.sendArrowUp()
-    fun sendArrowDown() = terminalSession?.sendArrowDown()
-    fun sendArrowLeft() = terminalSession?.sendArrowLeft()
-    fun sendArrowRight() = terminalSession?.sendArrowRight()
+    // Item T-11: every path also maintains the input tracker —
+    // plain text composes, anything that makes the shell-side
+    // line unknowable resets it.
+    fun sendText(text: String) {
+        if (text.any { com.pishi.termbridge.domain.ControlChars.isControl(it) }) {
+            inputTracker.reset()
+        } else {
+            inputTracker.type(text)
+        }
+        refreshSuggestions()
+        terminalSession?.sendText(text)
+    }
+
+    fun sendEnter() {
+        submitTrackedLine()
+        terminalSession?.sendEnter()
+    }
+
+    fun sendCtrlC() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendCtrlC()
+    }
+
+    fun sendCtrlD() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendCtrlD()
+    }
+
+    fun sendTab() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendTab()
+    }
+
+    fun sendEscape() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendEscape()
+    }
+
+    fun sendBackspace() {
+        inputTracker.backspace()
+        refreshSuggestions()
+        terminalSession?.sendByte(0x7F)
+    }
+    fun sendArrowUp() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendArrowUp()
+    }
+
+    fun sendArrowDown() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendArrowDown()
+    }
+
+    fun sendArrowLeft() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendArrowLeft()
+    }
+
+    fun sendArrowRight() {
+        inputTracker.reset()
+        refreshSuggestions()
+        terminalSession?.sendArrowRight()
+    }
     fun resizeTerminal(cols: Int, rows: Int) = terminalSession?.resize(cols, rows)
+
+    // Extra-keys bar (item T-09): sticky/lock Ctrl and Alt.
+    // The latch lives here, not in the composable, so a
+    // recomposition can never lose a latched modifier mid-key.
+    private val keyLatch = ModifierLatch()
+
+    private val _latchState = MutableStateFlow(LatchUiState())
+    val latchState: StateFlow<LatchUiState> = _latchState.asStateFlow()
+
+    /** What the bar renders for the two modifier buttons. */
+    data class LatchUiState(
+        val ctrl: LatchState = LatchState.OFF,
+        val alt: LatchState = LatchState.OFF
+    )
+
+    private fun publishLatch() {
+        _latchState.value = LatchUiState(ctrl = keyLatch.ctrl, alt = keyLatch.alt)
+    }
+
+    fun pressCtrlLatch() {
+        keyLatch.pressCtrl()
+        publishLatch()
+    }
+
+    fun pressAltLatch() {
+        keyLatch.pressAlt()
+        publishLatch()
+    }
+
+    /** A bar key: encoded with the latched modifiers, which a
+     *  one-shot latch spends on this press. */
+    fun sendSpecialKey(key: SpecialKey) {
+        // Item T-11: keep the input tracker honest per key.
+        when (key) {
+            SpecialKey.BACKSPACE -> inputTracker.backspace()
+            SpecialKey.ENTER -> submitTrackedLine()
+            else -> inputTracker.reset()
+        }
+        if (key != SpecialKey.ENTER) refreshSuggestions()
+        val bytes = TerminalKeyEncoder.encode(key, keyLatch.consume())
+        publishLatch()
+        terminalSession?.sendBytes(bytes)
+    }
+
+    // Hardware actions (item T-19): volume keys + shake. The
+    // mapping itself is pure domain logic (DeviceActionMapping);
+    // here it is executed against the live session. Both entry
+    // points return false when nothing was consumed — no live
+    // session, or the action is disabled — so the caller (the
+    // activity for volume keys) falls back to system behaviour.
+
+    /** Cumulative page-scroll requests from the volume keys;
+     *  the terminal view applies the delta since it last read. */
+    private val _scrollRequest = MutableStateFlow(0)
+    val scrollRequest: StateFlow<Int> = _scrollRequest.asStateFlow()
+
+    fun onVolumeKey(
+        key: com.pishi.termbridge.domain.VolumeKey,
+        isRepeat: Boolean = false
+    ): Boolean {
+        if (_uiState.value.status != SessionStatus.CONNECTED) return false
+        val action = com.pishi.termbridge.domain.VolumeKeyAction.fromId(
+            settings.value.volumeKeyAction
+        )
+        return when (
+            val effect = com.pishi.termbridge.domain.DeviceActionMapping
+                .volumeEffect(action, key)
+        ) {
+            com.pishi.termbridge.domain.VolumeEffect.None -> false
+            is com.pishi.termbridge.domain.VolumeEffect.AdjustFontSize -> {
+                appSettings?.update {
+                    it.copy(
+                        terminalFontSp = (it.terminalFontSp + effect.deltaSp)
+                            .coerceIn(
+                                com.pishi.termbridge.domain.AppSettings.MIN_FONT_SP,
+                                com.pishi.termbridge.domain.AppSettings.MAX_FONT_SP
+                            )
+                    )
+                }
+                true
+            }
+            com.pishi.termbridge.domain.VolumeEffect.ArmCtrl -> {
+                // A held key must not spin the latch cycle:
+                // repeats are consumed but not re-applied.
+                if (!isRepeat) pressCtrlLatch()
+                true
+            }
+            is com.pishi.termbridge.domain.VolumeEffect.ScrollPage -> {
+                _scrollRequest.value += effect.direction
+                true
+            }
+            is com.pishi.termbridge.domain.VolumeEffect.SendKey -> {
+                sendSpecialKey(effect.key)
+                true
+            }
+        }
+    }
+
+    fun onShake(): Boolean {
+        if (_uiState.value.status != SessionStatus.CONNECTED) return false
+        val action = com.pishi.termbridge.domain.ShakeAction.fromId(
+            settings.value.shakeAction
+        )
+        return when (
+            com.pishi.termbridge.domain.DeviceActionMapping.shakeEffect(action)
+        ) {
+            com.pishi.termbridge.domain.ShakeEffect.None -> false
+            com.pishi.termbridge.domain.ShakeEffect.ClearScreen -> {
+                terminalSession?.clearLocal()
+                true
+            }
+            com.pishi.termbridge.domain.ShakeEffect.Disconnect -> {
+                disconnect()
+                true
+            }
+        }
+    }
+
+    /**
+     * One typed character from the input field. With a latch
+     * active the character goes through the encoder (Ctrl-C
+     * from a latched Ctrl + 'c'); without one it is exactly
+     * the old sendText path.
+     */
+    fun sendTypedChar(c: Char) {
+        val current = keyLatch.current()
+        if (!current.ctrl && !current.alt) {
+            // Item T-11: a plain typed character composes.
+            if (com.pishi.termbridge.domain.ControlChars.isControl(c)) {
+                inputTracker.reset()
+            } else {
+                inputTracker.type(c.toString())
+            }
+            refreshSuggestions()
+            terminalSession?.sendText(c.toString())
+            return
+        }
+        // A latched chord can rewrite the line — stop tracking.
+        inputTracker.reset()
+        refreshSuggestions()
+        val bytes = TerminalKeyEncoder.encodeChar(c, keyLatch.consume())
+        publishLatch()
+        terminalSession?.sendBytes(bytes)
+    }
 
     override fun onCleared() {
         sequenceJob?.cancel()
@@ -728,12 +1339,21 @@ class SessionViewModelFactory(
     private val commandRepository: CommandRepository,
     private val environmentRepository: HostEnvironmentRepository,
     private val appSettings: com.pishi.termbridge.settings.AppSettingsStore? = null,
-    private val connectionLog: com.pishi.termbridge.settings.ConnectionLogStore? = null
+    private val connectionLog: com.pishi.termbridge.settings.ConnectionLogStore? = null,
+    private val customThemeRepository: com.pishi.termbridge.settings.CustomThemeRepository? = null,
+    private val keychainRepository: com.pishi.termbridge.data.KeychainRepository? = null,
+    private val snippetRepository: com.pishi.termbridge.data.SnippetRepository? = null,
+    private val transcriptStore: com.pishi.termbridge.settings.TranscriptStorage? = null,
+    private val commandHistoryStore: com.pishi.termbridge.settings.CommandHistoryStore? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SessionViewModel::class.java)) {
-            return SessionViewModel(repository, commandRepository, environmentRepository, appSettings, connectionLog) as T
+            return SessionViewModel(
+                repository, commandRepository, environmentRepository,
+                appSettings, connectionLog, customThemeRepository, keychainRepository,
+                snippetRepository, transcriptStore, commandHistoryStore
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

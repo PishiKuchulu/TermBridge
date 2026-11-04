@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.pishi.termbridge.R
+import com.pishi.termbridge.domain.LockMethod
 import com.pishi.termbridge.settings.AppLockStore
 import com.pishi.termbridge.settings.UnlockResult
 import com.pishi.termbridge.ui.components.PrimaryAction
@@ -47,28 +49,36 @@ fun LockScreen(
     modifier: Modifier = Modifier
 ) {
     var pin by remember { mutableStateOf("") }
+    var pattern by remember { mutableStateOf<List<Int>>(emptyList()) }
     var message by remember { mutableStateOf<String?>(null) }
     var throttledSeconds by remember { mutableStateOf(0) }
+    val method by store.method.collectAsState()
     val wrong = stringResource(R.string.lock_wrong)
+    val wrongPattern = stringResource(R.string.lock_wrong_pattern)
     val throttledText = stringResource(R.string.lock_throttled, throttledSeconds)
 
-    val attempt: () -> Unit = {
-        when (val result = store.verify(pin)) {
+    fun onResult(result: UnlockResult, wrongText: String) {
+        when (result) {
             UnlockResult.Success -> {
                 pin = ""
+                pattern = emptyList()
                 onUnlocked()
             }
             UnlockResult.Wrong -> {
                 pin = ""
-                message = wrong
+                pattern = emptyList()
+                message = wrongText
             }
             is UnlockResult.Throttled -> {
                 pin = ""
+                pattern = emptyList()
                 throttledSeconds = (result.retryInMs / 1000).toInt() + 1
                 message = null
             }
         }
     }
+
+    val attempt: () -> Unit = { onResult(store.verify(pin), wrong) }
     LaunchedEffect(biometricEnabled) {
         if (biometricEnabled) onBiometric()
     }
@@ -94,24 +104,48 @@ fun LockScreen(
                 text = stringResource(R.string.lock_title),
                 style = MaterialTheme.typography.headlineSmall
             )
-            OutlinedTextField(
-                value = pin,
-                onValueChange = { value ->
-                    pin = value.filter { it in '0'..'9' }.take(12)
-                    message = null
-                },
-                label = { Text(stringResource(R.string.lock_pin_hint)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.NumberPassword,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(onDone = { attempt() }),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = Spacing.large)
-            )
+            if (method == LockMethod.PATTERN) {
+                Text(
+                    text = stringResource(R.string.lock_pattern_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = Spacing.medium)
+                )
+                PatternGrid(
+                    points = pattern,
+                    onPointsChange = {
+                        pattern = it
+                        message = null
+                    },
+                    onComplete = { drawn ->
+                        if (drawn.isNotEmpty()) {
+                            onResult(store.verifyPattern(drawn), wrongPattern)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.medium)
+                )
+            } else {
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { value ->
+                        pin = value.filter { it in '0'..'9' }.take(12)
+                        message = null
+                    },
+                    label = { Text(stringResource(R.string.lock_pin_hint)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { attempt() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.large)
+                )
+            }
             val shown = message ?: if (throttledSeconds > 0) throttledText else null
             if (shown != null) {
                 Text(
@@ -121,13 +155,15 @@ fun LockScreen(
                     modifier = Modifier.padding(top = Spacing.small)
                 )
             }
-            PrimaryAction(
-                label = stringResource(R.string.lock_unlock),
-                onClick = { attempt() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = Spacing.medium)
-            )
+            if (method == LockMethod.PIN) {
+                PrimaryAction(
+                    label = stringResource(R.string.lock_unlock),
+                    onClick = { attempt() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.medium)
+                )
+            }
             if (biometricEnabled) {
                 TextButton(onClick = onBiometric) {
                     Text(stringResource(R.string.lock_use_biometric))

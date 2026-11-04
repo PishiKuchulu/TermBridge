@@ -49,17 +49,17 @@ class KeystoreAndRoomTest {
 
     @Test
     fun keystoreEncryptDecryptRoundTrip() {
-        val blob = crypto.encrypt("s3cr3t".toByteArray())
+        val blob = crypto.encrypt("s3cr3t".toByteArray(), com.pishi.termbridge.security.BlobContexts.hostCredential(1L))
         assertFalse(blob.contentEquals("s3cr3t".toByteArray()))
-        assertArrayEquals("s3cr3t".toByteArray(), crypto.decrypt(blob))
+        assertArrayEquals("s3cr3t".toByteArray(), crypto.decrypt(blob, com.pishi.termbridge.security.BlobContexts.hostCredential(1L)))
     }
 
     @Test
     fun keystoreTamperedBlobFails() {
-        val blob = crypto.encrypt("s3cr3t".toByteArray())
+        val blob = crypto.encrypt("s3cr3t".toByteArray(), com.pishi.termbridge.security.BlobContexts.hostCredential(1L))
         blob[blob.size - 1] = (blob[blob.size - 1].toInt() xor 0xFF).toByte()
         try {
-            crypto.decrypt(blob)
+            crypto.decrypt(blob, com.pishi.termbridge.security.BlobContexts.hostCredential(1L))
             throw AssertionError("Expected decryption to fail on tampered blob")
         } catch (e: Exception) {
             // Expected: GCM authentication failure.

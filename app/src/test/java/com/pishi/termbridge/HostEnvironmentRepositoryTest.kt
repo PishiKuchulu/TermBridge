@@ -198,4 +198,30 @@ class HostEnvironmentRepositoryTest {
         assertFalse(result.toString().contains("secret"))
         assertEquals(listOf("EDITOR", "FOO"), result.configuredNames)
     }
+
+    @Test
+    fun legacyEnvValueMigratesToBoundFormatOnLoad() = runTest {
+        // Item R-02: env values follow the same rule.
+        val settingsDao = FakeHostSettingsDao()
+        val envDao = FakeHostEnvVarDao()
+        val crypto = FakeSecretCrypto()
+        val repo = HostEnvironmentRepository(settingsDao, envDao, crypto)
+        repo.saveEnvVar(1L, 0L, "API_TOKEN", "top-secret-value".toCharArray())
+        val row = envDao.rawRowsForHost(1L).single()
+        envDao.update(
+            row.copy(
+                valueBlob =
+                    crypto.legacyEncrypt("top-secret-value".toByteArray(Charsets.UTF_8))
+            )
+        )
+        val loaded = repo.loadEnvVarsForConnection(1L)
+        assertTrue(loaded.undecryptableNames.isEmpty())
+        assertArrayEquals(
+            "top-secret-value".toByteArray(), loaded.values.single().value
+        )
+        loaded.values.forEach { it.value.wipe() }
+        val upgraded = envDao.rawRowsForHost(1L).single().valueBlob
+        assertFalse(crypto.isLegacyBlob(upgraded))
+    }
+
 }

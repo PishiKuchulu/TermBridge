@@ -8,13 +8,17 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.pishi.termbridge.data.HostRepository
 import com.pishi.termbridge.data.HostRepositoryException
+import com.pishi.termbridge.data.KeychainRepository
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CredentialInput
 import com.pishi.termbridge.domain.HostProfile
 import com.pishi.termbridge.domain.HostValidator
+import com.pishi.termbridge.domain.KeychainEntry
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -31,7 +35,8 @@ import kotlinx.coroutines.launch
  */
 class HostFormViewModel(
     private val repository: HostRepository,
-    private val hostId: Long?
+    private val hostId: Long?,
+    private val keychainRepository: KeychainRepository? = null
 ) : ViewModel() {
     var name by mutableStateOf("")
     var hostname by mutableStateOf("")
@@ -40,6 +45,10 @@ class HostFormViewModel(
     var authType by mutableStateOf(AuthType.PASSWORD)
     var notes by mutableStateOf("")
     var tags by mutableStateOf("")
+    // Item T-22: list organization, edited here and toggled
+    // from the list's star button.
+    var groupName by mutableStateOf("")
+    var favorite by mutableStateOf(false)
     var password by mutableStateOf("")
     var keyPem by mutableStateOf("")
     var passphrase by mutableStateOf("")
@@ -53,6 +62,23 @@ class HostFormViewModel(
 
     private var hasExistingCredential = false
     private var originalAuthType: AuthType? = null
+    /** True when the edited host's credential comes from a
+     *  keychain link: there is no inline blob to fall back on
+     *  if the user switches back to an inline credential
+     *  without typing one. */
+    private var wasLinked = false
+
+    // Item T-01: credential source. When the keychain is
+    // available the form can link the host to an entry instead
+    // of storing a credential inline; the repository validates
+    // the link (entry exists, kind matches, never both).
+    val keychainAvailable: Boolean get() = keychainRepository != null
+    val keychainEntries: StateFlow<List<KeychainEntry>> =
+        keychainRepository?.observeEntries()
+            ?.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+            ?: MutableStateFlow(emptyList())
+    var useKeychain by mutableStateOf(false)
+    var selectedKeychainEntryId by mutableStateOf<Long?>(null)
 
     init {
         if (hostId != null) {
@@ -66,7 +92,14 @@ class HostFormViewModel(
                 originalAuthType = profile.authType
                 notes = profile.notes
                 tags = profile.tags
+                groupName = profile.groupName
+                favorite = profile.favorite
                 hasExistingCredential = repository.hasCredential(hostId)
+                if (profile.keychainEntryId != null) {
+                    useKeychain = true
+                    selectedKeychainEntryId = profile.keychainEntryId
+                    wasLinked = true
+                }
             }
         }
     }
@@ -82,6 +115,12 @@ class HostFormViewModel(
 
     fun save() {
         val port = portText.toIntOrNull()
+        if (useKeychain && selectedKeychainEntryId == null) {
+            errors = mapOf(
+                "keychainEntry" to "Choose a keychain entry, or use a stored credential."
+            )
+            return
+        }
         val profile = HostProfile(
             id = hostId ?: 0L,
             name = name,
@@ -90,29 +129,47 @@ class HostFormViewModel(
             username = username,
             authType = authType,
             notes = notes,
-            tags = tags
+            tags = tags,
+            keychainEntryId = if (useKeychain) selectedKeychainEntryId else null,
+            favorite = favorite,
+            groupName = groupName
         )
         // A stored credential is only reusable when the auth type
         // has not changed; otherwise a password blob would be kept
-        // under a key auth type (or vice versa).
-        val usableExisting = hasExistingCredential && originalAuthType == authType
-        val credential: CredentialInput? = when (authType) {
-            AuthType.PASSWORD -> when {
-                password.isNotEmpty() -> CredentialInput.Password(password.toCharArray())
-                usableExisting -> null
-                else -> CredentialInput.Password(charArrayOf())
-            }
-            AuthType.PRIVATE_KEY -> when {
-                keyPem.isNotEmpty() -> CredentialInput.PrivateKey(
-                    keyPem,
-                    if (passphrase.isEmpty()) null else passphrase.toCharArray()
-                )
-                usableExisting -> null
-                else -> CredentialInput.PrivateKey("", null)
+        // under a key auth type (or vice versa). A keychain link
+        // is not an inline credential: unlinking without typing a
+        // new credential must fail validation, not silently save
+        // a credential-less host.
+        val usableExisting = hasExistingCredential && originalAuthType == authType &&
+            !(wasLinked && !useKeychain)
+        val credential: CredentialInput? = if (useKeychain) {
+            // The credential comes from the entry; the
+            // repository enforces the link rules on save.
+            null
+        } else {
+            when (authType) {
+                AuthType.PASSWORD -> when {
+                    password.isNotEmpty() -> CredentialInput.Password(password.toCharArray())
+                    usableExisting -> null
+                    else -> CredentialInput.Password(charArrayOf())
+                }
+                AuthType.PRIVATE_KEY -> when {
+                    keyPem.isNotEmpty() -> CredentialInput.PrivateKey(
+                        keyPem,
+                        if (passphrase.isEmpty()) null else passphrase.toCharArray()
+                    )
+                    usableExisting -> null
+                    else -> CredentialInput.PrivateKey("", null)
+                }
             }
         }
+        // With a keychain link chosen, the "credential required"
+        // check is satisfied by the link — the repository
+        // re-validates it (exists, kind matches) on save.
         val issues = HostValidator.validate(profile) +
-            HostValidator.validateCredential(authType, credential, usableExisting)
+            HostValidator.validateCredential(
+                authType, credential, usableExisting || useKeychain
+            )
         val portIssue = if (port == null) {
             listOf("port" to "Port must be a number.")
         } else {
@@ -148,12 +205,13 @@ class HostFormViewModel(
 
 class HostFormViewModelFactory(
     private val repository: HostRepository,
-    private val hostId: Long?
+    private val hostId: Long?,
+    private val keychainRepository: KeychainRepository? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HostFormViewModel::class.java)) {
-            return HostFormViewModel(repository, hostId) as T
+            return HostFormViewModel(repository, hostId, keychainRepository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

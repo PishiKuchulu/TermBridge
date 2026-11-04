@@ -37,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AppSettings
 import com.pishi.termbridge.domain.AppSettingsRules
+import com.pishi.termbridge.domain.LockMethod
+import com.pishi.termbridge.domain.PatternLock
+import com.pishi.termbridge.domain.scrollbackMemoryEstimateBytes
 import com.pishi.termbridge.domain.TerminalThemes
 import com.pishi.termbridge.ui.LockSettingsUi
 import com.pishi.termbridge.ui.theme.Spacing
@@ -57,8 +60,11 @@ fun SettingsScreen(
     onDiagnostics: () -> Unit,
     onAbout: () -> Unit,
     onBackup: () -> Unit = {},
+    customThemes: List<com.pishi.termbridge.domain.TerminalTheme> = emptyList(),
+    onEditCustomThemes: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var scrollbackDialogOpen by remember { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -76,17 +82,25 @@ fun SettingsScreen(
         )
         ChoiceRow(
             title = stringResource(R.string.settings_scrollback),
-            value = stringResource(R.string.settings_scrollback_value, settings.scrollbackLines),
-            onClick = {
-                onChange {
-                    it.copy(
-                        scrollbackLines = AppSettingsRules.next(
-                            AppSettings.SCROLLBACK_CHOICES, it.scrollbackLines
-                        )
-                    )
-                }
-            }
+            value = stringResource(
+                R.string.settings_scrollback_value, settings.scrollbackLines
+            ) + " · " + stringResource(
+                R.string.settings_scrollback_estimate,
+                formatBytesShort(scrollbackMemoryEstimateBytes(settings.scrollbackLines))
+            ),
+            hint = stringResource(R.string.settings_scrollback_hint),
+            onClick = { scrollbackDialogOpen = true }
         )
+        if (scrollbackDialogOpen) {
+            ScrollbackDialog(
+                current = settings.scrollbackLines,
+                onDismiss = { scrollbackDialogOpen = false },
+                onSave = { lines ->
+                    onChange { it.copy(scrollbackLines = lines) }
+                    scrollbackDialogOpen = false
+                }
+            )
+        }
         ChoiceRow(
             title = stringResource(R.string.settings_terminal_type),
             value = settings.terminalType,
@@ -103,11 +117,106 @@ fun SettingsScreen(
         )
         ChoiceRow(
             title = stringResource(R.string.settings_terminal_theme),
-            value = TerminalThemes.byId(settings.terminalTheme).label,
+            value = TerminalThemes.resolve(settings.terminalTheme, customThemes).label,
             onClick = {
                 onChange {
-                    val ids = TerminalThemes.all.map { t -> t.id }
+                    val ids = TerminalThemes.all.map { t -> t.id } +
+                        customThemes.map { t -> t.id }
                     it.copy(terminalTheme = AppSettingsRules.next(ids, it.terminalTheme))
+                }
+            }
+        )
+        LinkRow(stringResource(R.string.settings_custom_themes), onEditCustomThemes)
+        ChoiceRow(
+            title = stringResource(R.string.settings_cursor_style),
+            value = stringResource(
+                when (settings.cursorStyle) {
+                    AppSettings.CURSOR_STYLE_UNDERLINE -> R.string.settings_cursor_underline
+                    AppSettings.CURSOR_STYLE_BAR -> R.string.settings_cursor_bar
+                    else -> R.string.settings_cursor_block
+                }
+            ),
+            hint = stringResource(R.string.settings_cursor_hint),
+            onClick = {
+                onChange {
+                    it.copy(
+                        cursorStyle = AppSettingsRules.next(
+                            AppSettings.CURSOR_STYLES, it.cursorStyle
+                        )
+                    )
+                }
+            }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_cursor_blink),
+            hint = stringResource(R.string.settings_cursor_blink_hint),
+            checked = settings.cursorBlink,
+            onCheckedChange = { checked -> onChange { it.copy(cursorBlink = checked) } }
+        )
+        ChoiceRow(
+            title = stringResource(R.string.settings_scroll_sensitivity),
+            value = stringResource(
+                R.string.settings_scroll_sensitivity_value,
+                settings.scrollSensitivity.toString()
+            ),
+            onClick = {
+                onChange {
+                    it.copy(
+                        scrollSensitivity = AppSettingsRules.next(
+                            AppSettings.SCROLL_SENSITIVITIES, it.scrollSensitivity
+                        )
+                    )
+                }
+            }
+        )
+        // Hardware actions (item T-19), both default to Disabled.
+        ChoiceRow(
+            title = stringResource(R.string.settings_volume_keys),
+            value = stringResource(
+                when (settings.volumeKeyAction) {
+                    com.pishi.termbridge.domain.VolumeKeyAction.FONT_SIZE.id ->
+                        R.string.volume_action_font
+                    com.pishi.termbridge.domain.VolumeKeyAction.CTRL_MODIFIER.id ->
+                        R.string.volume_action_ctrl
+                    com.pishi.termbridge.domain.VolumeKeyAction.SCROLL.id ->
+                        R.string.volume_action_scroll
+                    com.pishi.termbridge.domain.VolumeKeyAction.SEND_KEY.id ->
+                        R.string.volume_action_key
+                    else -> R.string.volume_action_disabled
+                }
+            ),
+            hint = stringResource(R.string.settings_volume_keys_hint),
+            onClick = {
+                onChange {
+                    it.copy(
+                        volumeKeyAction = AppSettingsRules.next(
+                            com.pishi.termbridge.domain.VolumeKeyAction.IDS,
+                            it.volumeKeyAction
+                        )
+                    )
+                }
+            }
+        )
+        ChoiceRow(
+            title = stringResource(R.string.settings_shake),
+            value = stringResource(
+                when (settings.shakeAction) {
+                    com.pishi.termbridge.domain.ShakeAction.CLEAR_SCREEN.id ->
+                        R.string.shake_action_clear
+                    com.pishi.termbridge.domain.ShakeAction.DISCONNECT.id ->
+                        R.string.shake_action_disconnect
+                    else -> R.string.shake_action_disabled
+                }
+            ),
+            hint = stringResource(R.string.settings_shake_hint),
+            onClick = {
+                onChange {
+                    it.copy(
+                        shakeAction = AppSettingsRules.next(
+                            com.pishi.termbridge.domain.ShakeAction.IDS,
+                            it.shakeAction
+                        )
+                    )
                 }
             }
         )
@@ -116,6 +225,36 @@ fun SettingsScreen(
             hint = stringResource(R.string.settings_bell_haptic_hint),
             checked = settings.bellHaptic,
             onCheckedChange = { checked -> onChange { it.copy(bellHaptic = checked) } }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_extra_keys_bar),
+            hint = stringResource(R.string.settings_extra_keys_bar_hint),
+            checked = settings.showExtraKeysBar,
+            onCheckedChange = { checked -> onChange { it.copy(showExtraKeysBar = checked) } }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_autocomplete),
+            hint = stringResource(R.string.settings_autocomplete_hint),
+            checked = settings.autocompleteEnabled,
+            onCheckedChange = { checked -> onChange { it.copy(autocompleteEnabled = checked) } }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_detect_os),
+            hint = stringResource(R.string.settings_detect_os_hint),
+            checked = settings.detectOsOnConnect,
+            onCheckedChange = { checked -> onChange { it.copy(detectOsOnConnect = checked) } }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_bell_sound),
+            hint = stringResource(R.string.settings_bell_sound_hint),
+            checked = settings.bellSound,
+            onCheckedChange = { checked -> onChange { it.copy(bellSound = checked) } }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_bell_flash),
+            hint = stringResource(R.string.settings_bell_flash_hint),
+            checked = settings.bellFlash,
+            onCheckedChange = { checked -> onChange { it.copy(bellFlash = checked) } }
         )
         SwitchRow(
             title = stringResource(R.string.settings_keep_screen_on),
@@ -143,6 +282,22 @@ fun SettingsScreen(
                 }
             }
         )
+        ChoiceRow(
+            title = stringResource(R.string.settings_keepalive_misses),
+            value = stringResource(
+                R.string.settings_keepalive_misses_value, settings.keepAliveMaxMisses
+            ),
+            hint = stringResource(R.string.settings_keepalive_misses_hint),
+            onClick = {
+                onChange {
+                    it.copy(
+                        keepAliveMaxMisses = AppSettingsRules.next(
+                            AppSettings.KEEPALIVE_MAX_MISS_CHOICES, it.keepAliveMaxMisses
+                        )
+                    )
+                }
+            }
+        )
 
         SectionHeader(stringResource(R.string.settings_section_lock))
         LockSection(lock)
@@ -161,6 +316,83 @@ fun SettingsScreen(
         LinkRow(stringResource(R.string.action_about), onAbout)
         Spacer(modifier = Modifier.height(Spacing.large))
     }
+}
+
+/** "1.5 MB" / "320 KB" for the scrollback estimate. */
+private fun formatBytesShort(bytes: Long): String = when {
+    bytes >= 1_000_000L -> String.format("%.1f MB", bytes / 1_000_000.0)
+    bytes >= 1_000L -> String.format("%d KB", bytes / 1_000L)
+    else -> "$bytes B"
+}
+
+/**
+ * Custom scrollback editor (item T-23): any value inside the
+ * safe bounds, the memory estimate updating as you type, and
+ * the old presets as one-tap shortcuts.
+ */
+@Composable
+private fun ScrollbackDialog(
+    current: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int) -> Unit
+) {
+    var text by remember { mutableStateOf(current.toString()) }
+    val parsed = text.toIntOrNull()
+    val valid = parsed != null &&
+        parsed in AppSettings.MIN_SCROLLBACK..AppSettings.MAX_SCROLLBACK
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_scrollback)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { input ->
+                        text = input.filter { it.isDigit() }.take(6)
+                    },
+                    label = { Text(stringResource(R.string.settings_scrollback)) },
+                    singleLine = true,
+                    isError = text.isNotEmpty() && !valid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Text(
+                    text = stringResource(
+                        R.string.settings_scrollback_bounds,
+                        AppSettings.MIN_SCROLLBACK,
+                        AppSettings.MAX_SCROLLBACK
+                    ),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (parsed != null) {
+                    Text(
+                        text = stringResource(
+                            R.string.settings_scrollback_estimate,
+                            formatBytesShort(scrollbackMemoryEstimateBytes(parsed))
+                        ),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Row {
+                    for (preset in AppSettings.SCROLLBACK_CHOICES) {
+                        TextButton(onClick = { text = preset.toString() }) {
+                            Text(preset.toString())
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = valid,
+                onClick = { parsed?.let(onSave) }
+            ) { Text(stringResource(R.string.action_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        }
+    )
 }
 
 @Composable
@@ -285,6 +517,7 @@ private fun SettingsScreenPreview() {
 @Composable
 private fun LockSection(lock: LockSettingsUi) {
     var showSet by remember { mutableStateOf(false) }
+    var showSetPattern by remember { mutableStateOf(false) }
     var showDisable by remember { mutableStateOf(false) }
     SwitchRow(
         title = stringResource(R.string.settings_pin_lock),
@@ -302,6 +535,55 @@ private fun LockSection(lock: LockSettingsUi) {
             hint = if (lock.biometricAvailable) null else stringResource(R.string.settings_biometric_unavailable),
             checked = lock.biometricOn && lock.biometricAvailable,
             onCheckedChange = { on -> if (lock.biometricAvailable) lock.setBiometric(on) }
+        )
+        // Item T-18: the other credential method, the delay,
+        // the recents cover and lock-now.
+        if (lock.method == LockMethod.PIN) {
+            LinkRow(
+                title = stringResource(R.string.lock_change_pin),
+                onClick = { showSet = true }
+            )
+            LinkRow(
+                title = stringResource(R.string.lock_set_pattern_action),
+                onClick = { showSetPattern = true }
+            )
+        } else {
+            LinkRow(
+                title = stringResource(R.string.lock_change_pattern),
+                onClick = { showSetPattern = true }
+            )
+            LinkRow(
+                title = stringResource(R.string.lock_set_pin_action),
+                onClick = { showSet = true }
+            )
+        }
+        ChoiceRow(
+            title = stringResource(R.string.settings_auto_lock),
+            value = stringResource(
+                when (lock.autoLockDelayMs) {
+                    0L -> R.string.lock_delay_0
+                    60_000L -> R.string.lock_delay_60
+                    300_000L -> R.string.lock_delay_300
+                    else -> R.string.lock_delay_30
+                }
+            ),
+            onClick = {
+                val choices = lock.autoLockChoicesMs
+                if (choices.isNotEmpty()) {
+                    val idx = choices.indexOf(lock.autoLockDelayMs)
+                    lock.setAutoLockDelay(choices[(idx + 1).mod(choices.size)])
+                }
+            }
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_cover_recents),
+            hint = stringResource(R.string.settings_cover_recents_hint),
+            checked = lock.coverRecents,
+            onCheckedChange = { on -> lock.setCoverRecents(on) }
+        )
+        LinkRow(
+            title = stringResource(R.string.lock_now),
+            onClick = { lock.lockNow() }
         )
     }
     if (showSet) {
@@ -350,6 +632,71 @@ private fun LockSection(lock: LockSettingsUi) {
             }
         )
     }
+    if (showSetPattern) {
+        var first by remember { mutableStateOf<List<Int>?>(null) }
+        var drawn by remember { mutableStateOf<List<Int>>(emptyList()) }
+        var error by remember { mutableStateOf<String?>(null) }
+        val tooShortText = stringResource(R.string.lock_pattern_too_short)
+        val differText2 = stringResource(R.string.lock_patterns_differ)
+        AlertDialog(
+            onDismissRequest = { showSetPattern = false },
+            title = { Text(stringResource(R.string.lock_set_pattern_title)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(
+                            if (first == null) {
+                                R.string.lock_set_pattern_first
+                            } else {
+                                R.string.lock_set_pattern_confirm
+                            }
+                        )
+                    )
+                    PatternGrid(
+                        points = drawn,
+                        onPointsChange = { drawn = it },
+                        onComplete = { completed ->
+                            when {
+                                !PatternLock.isValid(completed) -> {
+                                    error = tooShortText
+                                    drawn = emptyList()
+                                }
+                                first == null -> {
+                                    first = completed
+                                    drawn = emptyList()
+                                    error = null
+                                }
+                                completed == first -> {
+                                    if (lock.setPattern(completed)) {
+                                        showSetPattern = false
+                                    } else {
+                                        error = tooShortText
+                                        first = null
+                                        drawn = emptyList()
+                                    }
+                                }
+                                else -> {
+                                    error = differText2
+                                    first = null
+                                    drawn = emptyList()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (error != null) {
+                        Text(text = error ?: "", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSetPattern = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
     if (showDisable) {
         var current by remember { mutableStateOf("") }
         var wrong by remember { mutableStateOf(false) }
@@ -360,24 +707,58 @@ private fun LockSection(lock: LockSettingsUi) {
             text = {
                 Column {
                     Text(stringResource(R.string.lock_disable_body))
-                    OutlinedTextField(
-                        value = current,
-                        onValueChange = {
-                            current = it.filter { c -> c in '0'..'9' }.take(12)
-                            wrong = false
-                        },
-                        label = { Text(stringResource(R.string.lock_pin_hint)) },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-                    )
-                    if (wrong) Text(text = wrongText, color = MaterialTheme.colorScheme.error)
+                    if (lock.method == LockMethod.PATTERN) {
+                        var drawn by remember { mutableStateOf<List<Int>>(emptyList()) }
+                        val wrongPatternText = stringResource(R.string.lock_wrong_pattern)
+                        PatternGrid(
+                            points = drawn,
+                            onPointsChange = {
+                                drawn = it
+                                wrong = false
+                            },
+                            onComplete = { completed ->
+                                if (completed.isNotEmpty()) {
+                                    if (lock.disableWithPattern(completed)) {
+                                        showDisable = false
+                                    } else {
+                                        wrong = true
+                                        drawn = emptyList()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (wrong) {
+                            Text(
+                                text = wrongPatternText,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = current,
+                            onValueChange = {
+                                current = it.filter { c -> c in '0'..'9' }.take(12)
+                                wrong = false
+                            },
+                            label = { Text(stringResource(R.string.lock_pin_hint)) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                        )
+                        if (wrong) Text(text = wrongText, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (lock.disable(current)) showDisable = false else wrong = true
-                }) { Text(stringResource(R.string.action_confirm)) }
+                // With a pattern, drawing the correct pattern in
+                // the grid above turns the lock off directly; the
+                // confirm button only exists for the PIN path.
+                if (lock.method != LockMethod.PATTERN) {
+                    TextButton(onClick = {
+                        if (lock.disable(current)) showDisable = false else wrong = true
+                    }) { Text(stringResource(R.string.action_confirm)) }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showDisable = false }) { Text(stringResource(R.string.action_cancel)) }

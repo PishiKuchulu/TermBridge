@@ -25,7 +25,10 @@ class HostRepositoryException(message: String) : Exception(message)
  *   passphrase is requested again at connection time (prompt 05).
  * - Editing without a new credential keeps the existing blob.
  * - Duplicating copies non-secret fields only; the duplicate has
- *   no credential until the user enters one.
+ *   no credential until the user enters one. A keychain
+ *   REFERENCE is copied: it points at the shared entry (the
+ *   keychain's whole purpose is sharing), it is not a copy of
+ *   the secret.
  * - Deleting a profile deletes its credential blob AND, since
  *   security fix 16 (M2), its trust record: the prompt-04 rule
  *   ("trust records survive deletion") was reversed because a
@@ -58,7 +61,13 @@ class HostRepository(
     // database transaction (see TermBridgeApplication).
     private val transactionRunner: TransactionRunner = object : TransactionRunner {
         override suspend fun <T> run(block: suspend () -> T): T = block()
-    }
+    },
+    // Item T-01: optional so existing callers/tests keep
+    // compiling. When present, hosts may reference a keychain
+    // entry instead of an inline credential, and loadCredential
+    // resolves the reference. Production passes it (see
+    // TermBridgeApplication).
+    private val keychainDao: KeychainDao? = null
 ) : com.pishi.termbridge.transport.HostKeyTrustStore {
     fun getHosts(): Flow<List<HostProfile>> =
         hostDao.getAll().map { rows -> rows.map { it.toProfile() } }
@@ -66,7 +75,9 @@ class HostRepository(
     suspend fun getHost(id: Long): HostProfile? = hostDao.getById(id)?.toProfile()
 
     suspend fun hasCredential(id: Long): Boolean =
-        hostDao.getById(id)?.credentialBlob != null
+        hostDao.getById(id)?.let {
+            it.credentialBlob != null || it.keychainEntryId != null
+        } ?: false
 
     /**
      * Save a new host (id == 0) or update an existing one.
@@ -83,8 +94,39 @@ class HostRepository(
         // password blob under a key auth type (or vice versa) — a
         // silent type confusion. Require a fresh credential then.
         val authTypeChanged = existing != null && existing.authType != profile.authType.name
-        val hasUsableCredential = existing?.credentialBlob != null && !authTypeChanged
-        val authTypeIssue = if (authTypeChanged && credential == null) {
+        // Item T-01: a keychain link is an alternative credential
+        // source. It must exist, its kind must match the host's
+        // auth type, and it excludes an inline credential in the
+        // same save — one source of truth per host.
+        val keychainIssues = mutableListOf<ValidationIssue>()
+        var keychainLinked = false
+        val linkedEntryId = profile.keychainEntryId
+        if (linkedEntryId != null) {
+            val dao = keychainDao
+            val entry = dao?.getById(linkedEntryId)
+            when {
+                dao == null -> keychainIssues += ValidationIssue(
+                    "credential",
+                    "Keychain is unavailable."
+                )
+                entry == null -> keychainIssues += ValidationIssue(
+                    "credential",
+                    "The selected keychain entry no longer exists."
+                )
+                entry.kind != profile.authType.name -> keychainIssues += ValidationIssue(
+                    "credential",
+                    "The selected keychain entry does not match the authentication type."
+                )
+                credential != null -> keychainIssues += ValidationIssue(
+                    "credential",
+                    "Choose either an inline credential or a keychain entry, not both."
+                )
+                else -> keychainLinked = true
+            }
+        }
+        val hasUsableCredential =
+            (existing?.credentialBlob != null && !authTypeChanged) || keychainLinked
+        val authTypeIssue = if (authTypeChanged && credential == null && !keychainLinked) {
             listOf(
                 ValidationIssue(
                     "credential",
@@ -96,12 +138,20 @@ class HostRepository(
         }
         val issues = HostValidator.validate(profile) +
             HostValidator.validateCredential(profile.authType, credential, hasUsableCredential) +
-            authTypeIssue
+            authTypeIssue + keychainIssues
         if (issues.isNotEmpty()) {
             throw HostRepositoryException(issues.joinToString("; ") { it.message })
         }
         val blob: ByteArray? = when {
-            credential != null -> encryptCredential(credential)
+            keychainLinked -> null
+            // Item R-02: an edit encrypts directly under the
+            // host's AAD context (the id is known). A NEW host
+            // has no id yet — its blob is written in phase 2,
+            // right after the insert assigns one.
+            credential != null && !isNew ->
+                encryptCredential(credential, com.pishi.termbridge.security.BlobContexts.hostCredential(profile.id))
+            credential != null -> null
+            profile.keychainEntryId != null -> null
             else -> existing?.credentialBlob
         }
         val now = clock()
@@ -116,11 +166,29 @@ class HostRepository(
             tags = profile.tags,
             credentialBlob = blob,
             createdAt = existing?.createdAt ?: now,
-            updatedAt = now
+            updatedAt = now,
+            keychainEntryId = if (keychainLinked) linkedEntryId else profile.keychainEntryId,
+            favorite = profile.favorite,
+            groupName = profile.groupName.trim(),
+            // Item T-22: connection history is bookkeeping, not
+            // form data — an edit never rewrites it; the stored
+            // value wins over whatever the profile carried.
+            lastConnectedAt = existing?.lastConnectedAt ?: profile.lastConnectedAt
         )
         val savedId = if (isNew) hostDao.insert(entity) else {
             hostDao.update(entity)
             profile.id
+        }
+        if (isNew && credential != null) {
+            // Phase 2 (item R-02): now that the id exists,
+            // encrypt under the host's real AAD context and
+            // store the blob. The credential is wiped by this
+            // call, as on every other path.
+            val realBlob = encryptCredential(
+                credential,
+                com.pishi.termbridge.security.BlobContexts.hostCredential(savedId)
+            )
+            hostDao.update(entity.copy(id = savedId, credentialBlob = realBlob))
         }
         return profile.copy(id = savedId)
     }
@@ -142,7 +210,11 @@ class HostRepository(
             name = newName,
             credentialBlob = null,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            // Item T-22: the duplicate has never been connected
+            // to; favorite and groupName DO carry over (they are
+            // the user's organization of the same server).
+            lastConnectedAt = null
         )
         val newId = hostDao.insert(copy)
         val settings = hostSettingsDao?.getForHostOnce(id)
@@ -191,16 +263,45 @@ class HostRepository(
     /** Load and decrypt a host's credential. Returns null when none
      *  is stored. Callers must wipe the returned bytes after use.
      *  A decryption failure surfaces as a generic message — the
-     *  user must re-enter the credential (see lifecycle doc). */
+     *  user must re-enter the credential (see lifecycle doc).
+     *  Item T-01: a host linked to a keychain entry resolves its
+     *  material from the entry — every existing caller (session,
+     *  files, tunnels, backup) therefore supports keychain hosts
+     *  without knowing the keychain exists. */
     suspend fun loadCredential(id: Long): ByteArray? {
-        val blob = hostDao.getById(id)?.credentialBlob ?: return null
-        return try {
-            secretCrypto.decrypt(blob)
+        val row = hostDao.getById(id) ?: return null
+        val entryId = row.keychainEntryId
+        if (entryId != null) {
+            val entry = keychainDao?.getById(entryId)
+                ?: throw HostRepositoryException(
+                    "The linked keychain entry is missing. Please choose a credential again."
+                )
+            val context = com.pishi.termbridge.security.BlobContexts.keychainEntry(entryId)
+            val plain = try {
+                secretCrypto.decrypt(entry.materialBlob, context)
+            } catch (e: Exception) {
+                throw HostRepositoryException(
+                    "Stored credential cannot be decrypted. Please re-enter it."
+                )
+            }
+            migrateLegacyBlob(secretCrypto, entry.materialBlob, plain, context) { upgraded ->
+                keychainDao?.update(entry.copy(materialBlob = upgraded))
+            }
+            return plain
+        }
+        val blob = row.credentialBlob ?: return null
+        val context = com.pishi.termbridge.security.BlobContexts.hostCredential(id)
+        val plain = try {
+            secretCrypto.decrypt(blob, context)
         } catch (e: Exception) {
             throw HostRepositoryException(
                 "Stored credential cannot be decrypted. Please re-enter it."
             )
         }
+        migrateLegacyBlob(secretCrypto, blob, plain, context) { upgraded ->
+            hostDao.update(row.copy(credentialBlob = upgraded))
+        }
+        return plain
     }
 
     override suspend fun getTrustedFingerprint(endpoint: String): String? =
@@ -224,32 +325,8 @@ class HostRepository(
         trustedHostKeyDao.deleteByEndpoint(endpoint)
     }
 
-    private fun encryptCredential(credential: CredentialInput): ByteArray {
-        return when (credential) {
-            is CredentialInput.Password -> {
-                try {
-                    val bytes = String(credential.password).toByteArray(Charsets.UTF_8)
-                    try {
-                        secretCrypto.encrypt(bytes)
-                    } finally {
-                        bytes.wipe()
-                    }
-                } finally {
-                    credential.password.wipe()
-                }
-            }
-            is CredentialInput.PrivateKey -> {
-                // The passphrase is deliberately NOT stored and NOT
-                // encrypted here: only the key PEM is persisted
-                // (itself encrypted by the Keystore layer).
-                try {
-                    secretCrypto.encrypt(credential.keyPem.toByteArray(Charsets.UTF_8))
-                } finally {
-                    credential.passphrase?.wipe()
-                }
-            }
-        }
-    }
+    private fun encryptCredential(credential: CredentialInput, context: String): ByteArray =
+        encryptCredentialToBlob(secretCrypto, credential, context)
 
     private fun HostEntity.toProfile(): HostProfile = HostProfile(
         id = id,
@@ -259,8 +336,23 @@ class HostRepository(
         username = username,
         authType = AuthType.valueOf(authType),
         notes = notes,
-        tags = tags
+        tags = tags,
+        keychainEntryId = keychainEntryId,
+        favorite = favorite,
+        groupName = groupName,
+        lastConnectedAt = lastConnectedAt
     )
+
+    /** Item T-22: stamp a successful connection. Bookkeeping
+     *  only — callers treat failure as non-fatal. */
+    suspend fun touchLastConnected(id: Long, atMs: Long = clock()) {
+        hostDao.touchLastConnected(id, atMs)
+    }
+
+    /** Item T-22: favorite toggle (one-column DAO update). */
+    suspend fun setFavorite(id: Long, favorite: Boolean) {
+        hostDao.setFavorite(id, favorite)
+    }
 
     /** All remembered host keys (the "Known hosts" screen). */
     fun observeTrustedKeys(): kotlinx.coroutines.flow.Flow<List<TrustedHostKeyEntity>> =

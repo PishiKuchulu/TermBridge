@@ -19,8 +19,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -39,6 +44,7 @@ import com.pishi.termbridge.data.BackupService
 import com.pishi.termbridge.data.CommandRepository
 import com.pishi.termbridge.data.HostEnvironmentRepository
 import com.pishi.termbridge.data.HostRepository
+import com.pishi.termbridge.data.KeychainRepository
 import com.pishi.termbridge.ui.viewmodel.AdvancedViewModelFactory
 import com.pishi.termbridge.ui.viewmodel.BackupViewModelFactory
 import com.pishi.termbridge.ui.viewmodel.CommandsViewModelFactory
@@ -61,6 +67,8 @@ import com.pishi.termbridge.ui.viewmodel.KnownHostsViewModelFactory
 import com.pishi.termbridge.ui.viewmodel.LogsViewModelFactory
 import com.pishi.termbridge.ui.screens.BackupScreen
 import com.pishi.termbridge.ui.screens.AdvancedScreen
+import com.pishi.termbridge.ui.screens.KeychainScreen
+import com.pishi.termbridge.ui.viewmodel.KeychainViewModelFactory
 import com.pishi.termbridge.ui.screens.CommandsScreen
 import com.pishi.termbridge.ui.screens.DiagnosticsScreen
 import com.pishi.termbridge.ui.screens.FilesScreen
@@ -96,6 +104,8 @@ private fun titleResFor(route: String?): Int = when (route) {
     Routes.VAULT -> R.string.vault_title
     Routes.CONNECTIONS -> R.string.connections_title
     Routes.KNOWN_HOSTS -> R.string.known_hosts_title
+    Routes.KEYCHAIN -> R.string.keychain_title
+    Routes.THEMES -> R.string.themes_title
     Routes.LOGS -> R.string.logs_title
     Routes.DISCOVER -> R.string.discover_title
     Routes.HOST_FORM_PREFILL -> R.string.host_form_title
@@ -146,14 +156,28 @@ fun TermBridgeApp(
     environmentRepository: HostEnvironmentRepository,
     advancedRepository: AdvancedRepository,
     backupService: BackupService,
+    keychainRepository: KeychainRepository,
+    snippetRepository: com.pishi.termbridge.data.SnippetRepository,
+    customThemeRepository: com.pishi.termbridge.settings.CustomThemeRepository,
+    desktopProfileRepository: com.pishi.termbridge.settings.DesktopProfileRepository,
+    transcriptStore: com.pishi.termbridge.settings.TranscriptStorage,
+    commandHistoryStore: com.pishi.termbridge.settings.CommandHistoryStore,
     appSettings: com.pishi.termbridge.settings.AppSettingsStore,
     connectionLog: com.pishi.termbridge.settings.ConnectionLogStore,
     lockSettings: com.pishi.termbridge.ui.LockSettingsUi,
+    onRegisterVolumeKeyHandler: (((com.pishi.termbridge.domain.VolumeKey, Boolean) -> Boolean)?) -> Unit = {},
     navController: NavHostController = rememberNavController()
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val canGoBack = navController.previousBackStackEntry != null
+    // Immersive terminal (item Q-01): the session screen reports
+    // its expanded state; the chrome follows it, and leaving the
+    // session route always restores the chrome.
+    var sessionExpanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != Routes.SESSION) sessionExpanded = false
+    }
 
     // Prompt 14: the session ViewModel is hoisted here (same
     // activity-scoped instance the Session screen uses, so this
@@ -168,15 +192,63 @@ fun TermBridgeApp(
             commandRepository,
             environmentRepository,
             appSettings,
-            connectionLog
+            connectionLog,
+            customThemeRepository,
+            keychainRepository,
+            snippetRepository,
+            transcriptStore,
+            commandHistoryStore
         ),
         viewModelStoreOwner = activity
     )
     val sessionUiState by sessionViewModel.uiState.collectAsState()
     val liveSession = sessionUiState.status == SessionStatus.CONNECTED
+    // Hardware volume keys (item T-19): the activity forwards
+    // them here only while the session route is showing; the
+    // view model decides (per the user's setting) whether a
+    // press is consumed or falls through to system volume.
+    DisposableEffect(currentRoute) {
+        if (currentRoute == Routes.SESSION) {
+            onRegisterVolumeKeyHandler { key, isRepeat ->
+                sessionViewModel.onVolumeKey(key, isRepeat)
+            }
+        } else {
+            onRegisterVolumeKeyHandler(null)
+        }
+        onDispose {
+            if (currentRoute == Routes.SESSION) onRegisterVolumeKeyHandler(null)
+        }
+    }
+
+    // Item Q-06: first-run onboarding gate. Shown until the
+    // user finishes or skips it (AppSettings.onboardingSeen);
+    // "Add your first host" also lands on the host form once
+    // the scaffold composes. All hook calls above this point
+    // stay unconditional — the gate only swaps the content.
+    val appPrefs by appSettings.settings.collectAsState()
+    var startAtHostForm by rememberSaveable { mutableStateOf(false) }
+    if (!appPrefs.onboardingSeen) {
+        com.pishi.termbridge.ui.screens.OnboardingScreen(
+            onFinish = {
+                appSettings.update { it.copy(onboardingSeen = true) }
+            },
+            onAddHost = {
+                appSettings.update { it.copy(onboardingSeen = true) }
+                startAtHostForm = true
+            }
+        )
+        return
+    }
+    LaunchedEffect(startAtHostForm) {
+        if (startAtHostForm) {
+            navController.navigate(Routes.HOST_FORM)
+            startAtHostForm = false
+        }
+    }
 
     Scaffold(
         topBar = {
+            if (!sessionExpanded) {
             TopAppBar(
                 title = { Text(text = stringResource(titleResFor(currentRoute))) },
                 navigationIcon = {
@@ -205,8 +277,13 @@ fun TermBridgeApp(
                     }
                 }
             )
+            }
         },
         bottomBar = {
+            // The session is a live-work surface: the tab bar
+            // yields its height to the terminal there (Q-01),
+            // and in expanded mode all chrome is gone anyway.
+            if (currentRoute != Routes.SESSION && !sessionExpanded) {
             NavigationBar {
                 bottomDestinations.forEach { destination ->
                     val selected = tabFor(currentRoute) == destination.route
@@ -229,6 +306,7 @@ fun TermBridgeApp(
                     )
                 }
             }
+            }
         }
     ) { innerPadding ->
         NavHost(
@@ -242,15 +320,37 @@ fun TermBridgeApp(
                     onPortForwarding = { navController.navigate(Routes.ADVANCED) },
                     onSnippets = { navController.navigate(Routes.COMMANDS) },
                     onKnownHosts = { navController.navigate(Routes.KNOWN_HOSTS) },
-                    onLogs = { navController.navigate(Routes.LOGS) }
+                    onLogs = { navController.navigate(Routes.LOGS) },
+                    onKeychain = { navController.navigate(Routes.KEYCHAIN) }
+                )
+            }
+            composable(Routes.KEYCHAIN) {
+                KeychainScreen(
+                    viewModel = viewModel(factory = KeychainViewModelFactory(keychainRepository))
                 )
             }
             composable(Routes.CONNECTIONS) {
                 val recent by connectionLog.entries.collectAsState()
+                val keychainEntries by keychainRepository.observeEntries()
+                    .collectAsState(initial = emptyList())
                 ConnectionsScreen(
                     recent = recent,
                     liveSession = liveSession,
-                    onQuickConnect = { target ->
+                    keychainEntries = keychainEntries,
+                    onQuickConnectPassword = { target, username, password ->
+                        sessionViewModel.quickConnect(
+                            target, username,
+                            com.pishi.termbridge.domain.CredentialInput.Password(password)
+                        )
+                        navController.navigate(Routes.SESSION)
+                    },
+                    onQuickConnectKeychain = { target, username, entryId, passphrase ->
+                        sessionViewModel.quickConnectWithKeychain(
+                            target, username, entryId, passphrase
+                        )
+                        navController.navigate(Routes.SESSION)
+                    },
+                    onSaveAsHost = { target ->
                         val text = (target.username?.let { "$it@" } ?: "") +
                             target.host + ":" + target.port
                         navController.navigate(Routes.hostFormPrefillRoute(text))
@@ -290,7 +390,7 @@ fun TermBridgeApp(
                     backStackEntry.arguments?.getString("prefill") ?: ""
                 )
                 val formViewModel: com.pishi.termbridge.ui.viewmodel.HostFormViewModel =
-                    viewModel(factory = HostFormViewModelFactory(repository, null))
+                    viewModel(factory = HostFormViewModelFactory(repository, null, keychainRepository))
                 androidx.compose.runtime.LaunchedEffect(target) {
                     if (target != null) {
                         formViewModel.applyPrefill(target.host, target.port, target.username)
@@ -330,7 +430,7 @@ fun TermBridgeApp(
             }
             composable(Routes.HOST_FORM) {
                 HostFormScreen(
-                    viewModel = viewModel(factory = HostFormViewModelFactory(repository, null)),
+                    viewModel = viewModel(factory = HostFormViewModelFactory(repository, null, keychainRepository)),
                     onSaved = { navController.navigateUp() }
                 )
             }
@@ -340,7 +440,7 @@ fun TermBridgeApp(
             ) { backStackEntry ->
                 val hostId = backStackEntry.arguments?.getLong("hostId") ?: 0L
                 HostFormScreen(
-                    viewModel = viewModel(factory = HostFormViewModelFactory(repository, hostId)),
+                    viewModel = viewModel(factory = HostFormViewModelFactory(repository, hostId, keychainRepository)),
                     onSaved = { navController.navigateUp() }
                 )
             }
@@ -352,7 +452,8 @@ fun TermBridgeApp(
                 // activity owner + factory = same instance).
                 SessionScreen(
                     viewModel = sessionViewModel,
-                    onAddHost = { navController.navigate(Routes.HOST_FORM) }
+                    onAddHost = { navController.navigate(Routes.HOST_FORM) },
+                    onTerminalExpandedChange = { sessionExpanded = it }
                 )
             }
             composable(Routes.FILES) {
@@ -371,7 +472,9 @@ fun TermBridgeApp(
             composable(Routes.COMMANDS) {
                 CommandsScreen(
                     viewModel = viewModel(
-                        factory = CommandsViewModelFactory(repository, commandRepository)
+                        factory = CommandsViewModelFactory(
+                            repository, commandRepository, snippetRepository
+                        )
                     ),
                     onAddHost = { navController.navigate(Routes.HOST_FORM) },
                     onOpenSession = { navController.navigate(Routes.SESSION) }
@@ -389,7 +492,12 @@ fun TermBridgeApp(
                 // Activity-scoped so a running VNC session survives
                 // navigating to another screen and back.
                 RemoteDesktopScreen(
-                    viewModel = viewModel(viewModelStoreOwner = activity)
+                    viewModel = viewModel(
+                        viewModelStoreOwner = activity,
+                        factory = com.pishi.termbridge.ui.viewmodel.RemoteDesktopViewModelFactory(
+                            repository, desktopProfileRepository
+                        )
+                    )
                 )
             }
             composable(
@@ -397,19 +505,35 @@ fun TermBridgeApp(
                 arguments = listOf(navArgument("host") { type = NavType.StringType })
             ) { entry ->
                 RemoteDesktopScreen(
-                    viewModel = viewModel(viewModelStoreOwner = activity),
+                    viewModel = viewModel(
+                        viewModelStoreOwner = activity,
+                        factory = com.pishi.termbridge.ui.viewmodel.RemoteDesktopViewModelFactory(
+                            repository, desktopProfileRepository
+                        )
+                    ),
                     initialHost = entry.arguments?.getString("host") ?: ""
                 )
             }
             composable(Routes.SETTINGS) {
                 val currentSettings by appSettings.settings.collectAsState()
+                val customs by customThemeRepository.themes.collectAsState()
                 SettingsScreen(
                     settings = currentSettings,
                     lock = lockSettings,
                     onChange = { transform -> appSettings.update(transform) },
                     onDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
                     onAbout = { navController.navigate(Routes.ABOUT) },
-                    onBackup = { navController.navigate(Routes.BACKUP) }
+                    onBackup = { navController.navigate(Routes.BACKUP) },
+                    customThemes = customs,
+                    onEditCustomThemes = { navController.navigate(Routes.THEMES) }
+                )
+            }
+            composable(Routes.THEMES) {
+                val customs by customThemeRepository.themes.collectAsState()
+                com.pishi.termbridge.ui.screens.ThemeEditorScreen(
+                    customThemes = customs,
+                    onUpsert = { theme -> customThemeRepository.upsert(theme) },
+                    onDelete = { id -> customThemeRepository.delete(id) }
                 )
             }
             composable(Routes.BACKUP) {

@@ -15,6 +15,9 @@
 #     a pre-authentication failure leaves evidence in sshd.log
 #   - AcceptEnv TERM_BRIDGE_* (so the env accepted/rejected test has
 #     a real policy to hit)
+#   - AllowTcpForwarding yes, plus the item T-20 extras: a second
+#     (bastion) sshd for jump chains, a python3 TCP echo service as
+#     the forwarding target, and a python3 no-auth SOCKS5 proxy
 #
 # What it NEVER does:
 #   - echo, log, or store the password (it arrives only via
@@ -44,6 +47,12 @@ FIXTURE_USER="${FIXTURE_USER:-termbridge-test}"
 FIXTURE_KEY_USER="${FIXTURE_KEY_USER:-termbridge-key}"
 FIXTURE_VNC_PORT="${FIXTURE_VNC_PORT:-5901}"
 FIXTURE_PORT="${FIXTURE_PORT:-2222}"
+# Item T-20 fixture extras: a bastion sshd for the jump-chain
+# test, a TCP echo service as the forwarding target, and a
+# no-auth SOCKS5 proxy for the proxied-connection test.
+FIXTURE_BASTION_PORT="${FIXTURE_BASTION_PORT:-2223}"
+FIXTURE_ECHO_PORT="${FIXTURE_ECHO_PORT:-18081}"
+FIXTURE_SOCKS_PORT="${FIXTURE_SOCKS_PORT:-10809}"
 FIXTURE_DIR="${FIXTURE_DIR:-/tmp/termbridge-sshd-fixture}"
 
 if [ -z "${FIXTURE_PASSWORD:-}" ]; then
@@ -88,13 +97,21 @@ fi
 
 # Client key for the public-key user: Ed25519 in OpenSSH format (the
 # format sshj 0.40.0 reads for Ed25519), generated per run, never
-# committed. Not RSA: OpenSSH 8.8+ refuses ssh-rsa (SHA-1) user-auth
-# signatures, which would fail for reasons unrelated to the app.
+# committed.
 sudo rm -f "$FIXTURE_DIR/client_key" "$FIXTURE_DIR/client_key.pub"
 sudo ssh-keygen -t ed25519 -f "$FIXTURE_DIR/client_key" -N "" -q
 sudo cp "$FIXTURE_DIR/client_key.pub" "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
 sudo chmod 644 "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
 sudo chmod 644 "$FIXTURE_DIR/client_key"
+
+# Item R-10: a second client key, RSA-3072. OpenSSH 8.8+ refuses
+# ssh-rsa (SHA-1) user-auth signatures, but sshj signs RSA keys
+# with rsa-sha2-256/512, which modern OpenSSH accepts — this key
+# exists to prove exactly that path end to end.
+sudo rm -f "$FIXTURE_DIR/client_key_rsa" "$FIXTURE_DIR/client_key_rsa.pub"
+sudo ssh-keygen -t rsa -b 3072 -f "$FIXTURE_DIR/client_key_rsa" -N "" -q
+sudo cat "$FIXTURE_DIR/client_key_rsa.pub" >> "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
+sudo chmod 644 "$FIXTURE_DIR/client_key_rsa"
 
 sudo tee "$FIXTURE_DIR/sshd_config" >/dev/null <<EOF
 Port $FIXTURE_PORT
@@ -112,6 +129,9 @@ UsePAM no
 StrictModes no
 PrintMotd no
 AcceptEnv TERM_BRIDGE_*
+# Item T-20: forwarding is exercised against this fixture;
+# state the permission instead of relying on sshd's default.
+AllowTcpForwarding yes
 Subsystem sftp /usr/lib/openssh/sftp-server
 # Match blocks must come last (Subsystem is not allowed inside one).
 Match User $FIXTURE_KEY_USER
@@ -127,22 +147,98 @@ if [ -f "$FIXTURE_DIR/sshd.pid" ] && sudo kill -0 "$(cat "$FIXTURE_DIR/sshd.pid"
 fi
 sudo /usr/sbin/sshd -f "$FIXTURE_DIR/sshd_config" -E "$FIXTURE_DIR/sshd.log"
 
-# Verify: sshd must actually be listening, or fail the job.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if (command -v ss >/dev/null 2>&1 && ss -ltn | grep -q ":$FIXTURE_PORT ") || \
-       (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$FIXTURE_PORT"); then
-        echo "Fixture sshd listening on port $FIXTURE_PORT."
-        for k in ed25519 rsa ecdsa; do
-            sudo ssh-keygen -lf "$FIXTURE_DIR/ssh_host_${k}_key.pub"
-        done
-        echo "Fixture user: $FIXTURE_USER (password supplied via FIXTURE_PASSWORD only)."
-        exit 0
-    fi
+# ---- Item T-20 extras: bastion sshd, echo service, SOCKS5 ----
+# Bastion: a second sshd on its own port, same users. Item R-10:
+# it presents its OWN host keys (different from the main sshd's)
+# so the changed-host-key test can re-point a local relay from
+# the main sshd to this one and watch the app report a CHANGED
+# key for what is, to the app, the same endpoint.
+if [ ! -f "$FIXTURE_DIR/ssh_host_ed25519_key_bastion" ]; then
+    sudo ssh-keygen -t ed25519 -f "$FIXTURE_DIR/ssh_host_ed25519_key_bastion" -N "" -q
+fi
+sudo tee "$FIXTURE_DIR/sshd_config_bastion" >/dev/null <<EOF
+Port $FIXTURE_BASTION_PORT
+ListenAddress 127.0.0.1
+LogLevel DEBUG1
+PidFile $FIXTURE_DIR/sshd-bastion.pid
+HostKey $FIXTURE_DIR/ssh_host_ed25519_key_bastion
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile $FIXTURE_DIR/authorized_keys_%u
+ChallengeResponseAuthentication no
+UsePAM no
+StrictModes no
+PrintMotd no
+AllowTcpForwarding yes
+Subsystem sftp /usr/lib/openssh/sftp-server
+Match User $FIXTURE_KEY_USER
+    PasswordAuthentication no
+Match User $FIXTURE_USER
+    PubkeyAuthentication no
+EOF
+if [ -f "$FIXTURE_DIR/sshd-bastion.pid" ] && sudo kill -0 "$(cat "$FIXTURE_DIR/sshd-bastion.pid")" 2>/dev/null; then
+    sudo kill "$(cat "$FIXTURE_DIR/sshd-bastion.pid")"
     sleep 1
+fi
+sudo /usr/sbin/sshd -f "$FIXTURE_DIR/sshd_config_bastion" -E "$FIXTURE_DIR/sshd-bastion.log"
+
+# Echo + SOCKS services: plain python3, loopback only, per-run
+# processes (pid files under FIXTURE_DIR; the CI runner reaps
+# everything at job end regardless).
+FIXTURE_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+for svc in echo socks; do
+    if [ "$svc" = echo ]; then
+        svc_port="$FIXTURE_ECHO_PORT"; svc_script="echo_server.py"
+    else
+        svc_port="$FIXTURE_SOCKS_PORT"; svc_script="socks5_proxy.py"
+    fi
+    if [ -f "$FIXTURE_DIR/$svc.pid" ] && kill -0 "$(cat "$FIXTURE_DIR/$svc.pid")" 2>/dev/null; then
+        kill "$(cat "$FIXTURE_DIR/$svc.pid")" || true
+        sleep 1
+    fi
+    nohup python3 "$FIXTURE_SCRIPT_DIR/$svc_script" "$svc_port" \
+        >"$FIXTURE_DIR/$svc.log" 2>&1 &
+    echo $! > "$FIXTURE_DIR/$svc.pid"
 done
-echo "Fixture sshd failed to listen on port $FIXTURE_PORT." >&2
-sudo cat "$FIXTURE_DIR/sshd.log" 2>/dev/null || true
-exit 1
+
+# Verify: every service must actually be listening, or fail
+# the job (a missing capability must never become a silent
+# test skip in CI).
+port_listening() {
+    (command -v ss >/dev/null 2>&1 && ss -ltn | grep -q ":$1 ") || \
+    (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$1")
+}
+wait_for_port() {
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if port_listening "$1"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+if ! wait_for_port "$FIXTURE_PORT"; then
+    echo "Fixture sshd failed to listen on port $FIXTURE_PORT." >&2
+    sudo cat "$FIXTURE_DIR/sshd.log" 2>/dev/null || true
+    exit 1
+fi
+echo "Fixture sshd listening on port $FIXTURE_PORT."
+for extra in "$FIXTURE_BASTION_PORT:bastion sshd" \
+             "$FIXTURE_ECHO_PORT:echo service" \
+             "$FIXTURE_SOCKS_PORT:SOCKS5 proxy"; do
+    extra_port="${extra%%:*}"
+    extra_name="${extra#*:}"
+    if ! wait_for_port "$extra_port"; then
+        echo "Fixture $extra_name failed to listen on port $extra_port." >&2
+        exit 1
+    fi
+    echo "Fixture $extra_name listening on port $extra_port."
+done
+for k in ed25519 rsa ecdsa; do
+    sudo ssh-keygen -lf "$FIXTURE_DIR/ssh_host_${k}_key.pub"
+done
+echo "Fixture user: $FIXTURE_USER (password supplied via FIXTURE_PASSWORD only)."
+exit 0
 
 # ---- Optional VNC server for the RFB integration test (best effort) ----
 # A virtual display plus x11vnc on loopback with a per-run password. If

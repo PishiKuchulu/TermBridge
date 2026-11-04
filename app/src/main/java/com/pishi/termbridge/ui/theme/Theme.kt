@@ -32,7 +32,10 @@ private val DarkScheme = darkColorScheme(
     onSurface = Color(0xFFE6EAF2),
     surfaceVariant = Color(0xFF1E2638),
     onSurfaceVariant = Color(0xFFA9B3C7),
-    outline = Color(0xFF4A5570),
+    // Item Q-04: raised from 0xFF4A5570 (2.31:1 on the
+    // dark surface) to clear the 3:1 non-text boundary
+    // guidance — 3.46:1 on surface, 3.71:1 on background.
+    outline = Color(0xFF64708C),
     outlineVariant = Color(0xFF2A3348),
     error = Color(0xFFFF6B6B),
     onError = Color(0xFF3B0000)

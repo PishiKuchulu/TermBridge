@@ -25,7 +25,21 @@ data class HostEntity(
     val tags: String,
     val credentialBlob: ByteArray?,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    // Item T-01 (database v6): reference to a shared keychain
+    // entry, or null when the host uses its inline
+    // credentialBlob. No foreign-key constraint — the same
+    // plain-column pattern as the v5 shellConfirmed addition;
+    // referential integrity is a repository rule (deleting a
+    // referenced entry is refused or detaches explicitly).
+    val keychainEntryId: Long? = null,
+    // Item T-22 (database v8): list organization. favorite and
+    // groupName are user-curated; lastConnectedAt is stamped by
+    // the session layer on a successful connect and is never
+    // edited by hand.
+    val favorite: Boolean = false,
+    val groupName: String = "",
+    val lastConnectedAt: Long? = null
 )
 
 /**

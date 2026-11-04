@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -190,6 +191,68 @@ fun HostEnvironmentScreen(
             text = stringResource(R.string.env_remote_dir_note),
             style = MaterialTheme.typography.bodySmall
         )
+        // Item F-02: the shell-export fallback opt-in, saved
+        // with the settings save below like everything here.
+        Spacer(modifier = Modifier.height(Spacing.medium))
+        androidx.compose.foundation.layout.Row(
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(text = stringResource(R.string.env_fallback_label))
+                Text(
+                    text = stringResource(R.string.env_fallback_hint),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = viewModel.envExportFallback,
+                onCheckedChange = { viewModel.envExportFallback = it }
+            )
+        }
+        Spacer(modifier = Modifier.height(Spacing.medium))
+        // Item T-03: session transcript opt-ins.
+        androidx.compose.foundation.layout.Row(
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(text = stringResource(R.string.env_log_label))
+                Text(
+                    text = stringResource(R.string.env_log_hint),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = viewModel.sessionLogEnabled,
+                onCheckedChange = { viewModel.sessionLogEnabled = it }
+            )
+        }
+        if (viewModel.sessionLogEnabled) {
+            Spacer(modifier = Modifier.height(Spacing.small))
+            androidx.compose.foundation.layout.Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = stringResource(R.string.env_log_backup_label))
+                    Text(
+                        text = stringResource(R.string.env_log_backup_hint),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Switch(
+                    checked = viewModel.sessionLogInBackup,
+                    onCheckedChange = { viewModel.sessionLogInBackup = it }
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(Spacing.large))
 
         Text(

@@ -18,9 +18,11 @@ package com.pishi.termbridge.terminal
  *   offer a "Jump to latest" action with an honest count.
  * - Scrolling back to the bottom re-pins the view.
  *
- * The view itself owns the pinned flag (from LazyListState
- * layout info); these functions only decide, from numbers, what
- * the flag means. Nothing here touches the shell or the parser.
+ * The view owns the pinned state — since the Canvas renderer
+ * (item Q-03) that is its offset-from-bottom being zero — and
+ * these functions decide, from numbers, what the state means
+ * ([newLinesSince] is what the jump-to-latest chip shows).
+ * Nothing here touches the shell or the parser.
  */
 
 /**

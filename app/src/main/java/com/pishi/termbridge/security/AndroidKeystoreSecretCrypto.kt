@@ -21,6 +21,16 @@ import javax.crypto.spec.GCMParameterSpec
  * - Fresh 12-byte IV per encryption; blob layout is IV || ciphertext
  *   (GCM tag included by the cipher). IV reuse with the same key
  *   would break GCM, so the IV is never reused and never fixed.
+ * - Item R-02: new blobs are v2 — a 0x02 version byte, then
+ *   IV || ciphertext, with the caller's context string bound
+ *   as GCM additional authenticated data (see BlobContexts).
+ *   Decryption of a blob whose first byte is 0x02 uses the
+ *   AAD path; anything else is read as a legacy v1 blob
+ *   (IV || ciphertext, no AAD) so old rows keep working and
+ *   can be migrated. Known caveat: a legacy blob whose random
+ *   IV happens to start with 0x02 (1 in 256) is misread as v2
+ *   and fails authentication — the documented recovery is
+ *   re-entering that one credential; no other row is affected.
  * - The deprecated androidx.security wrapper is deliberately NOT
  *   used (see ADR-05); this is direct platform Keystore use.
  *
@@ -82,21 +92,38 @@ class AndroidKeystoreSecretCrypto : SecretCrypto {
         }
     }
 
-    override fun encrypt(plaintext: ByteArray): ByteArray {
+    override fun encrypt(plaintext: ByteArray, context: String): ByteArray {
         // AndroidKeyStore with setRandomizedEncryptionRequired(true)
         // rejects caller-provided IVs for encryption
         // ("Caller-provided IV not permitted", CI run #11): the IV
-        // must come from the Keystore itself. Blob layout is
-        // unchanged (IV || ciphertext), so decrypt is untouched.
+        // must come from the Keystore itself.
         val cipher = Cipher.getInstance(TRANSFORMATION).apply {
             init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            updateAAD(context.toByteArray(Charsets.UTF_8))
         }
         val iv = cipher.iv
         val ciphertext = cipher.doFinal(plaintext)
-        return iv + ciphertext
+        return byteArrayOf(SecretCrypto.BLOB_VERSION_2) + iv + ciphertext
     }
 
-    override fun decrypt(blob: ByteArray): ByteArray {
+    override fun decrypt(blob: ByteArray, context: String): ByteArray {
+        return if (isLegacyBlob(blob)) {
+            decryptLegacy(blob)
+        } else {
+            require(blob.size > 1 + IV_BYTES) { "Encrypted blob is too short." }
+            val iv = blob.copyOfRange(1, 1 + IV_BYTES)
+            val ciphertext = blob.copyOfRange(1 + IV_BYTES, blob.size)
+            val cipher = Cipher.getInstance(TRANSFORMATION).apply {
+                init(Cipher.DECRYPT_MODE, getExistingKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+                updateAAD(context.toByteArray(Charsets.UTF_8))
+            }
+            cipher.doFinal(ciphertext)
+        }
+    }
+
+    /** Pre-R-02 layout: IV || ciphertext, no AAD. Read-only path;
+     *  repositories re-encrypt to v2 after a successful read. */
+    private fun decryptLegacy(blob: ByteArray): ByteArray {
         require(blob.size > IV_BYTES) { "Encrypted blob is too short." }
         val iv = blob.copyOfRange(0, IV_BYTES)
         val ciphertext = blob.copyOfRange(IV_BYTES, blob.size)

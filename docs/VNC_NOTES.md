@@ -331,3 +331,17 @@ auth, encodings offered/used, pixel format):
    before: until a real-server connection exists, every
    VNC statement in docs and UI must keep the
    "server-unproven" qualifier.
+
+## Update, 2026-11-04 — item F-03
+
+- Proof: RfbLiveTest (JVM, env-gated TB_VNC_HOST/PORT/PASS)
+  runs the real handshake + first frame against x11vnc in a
+  dedicated `vnc` CI job; it Assume-skips everywhere else.
+  The in-emulator-job VNC fixture stays reverted (it hung
+  that job twice) — do not revive it there.
+- Polish landed: zoom/pan (domain/DesktopGeometry), middle
+  click, wheel buttons, sticky modifiers, clipboard send,
+  reconnect refill, VNC-over-SSH through the app's local
+  forward (bindPort 0; the resolved port is surfaced by
+  SshTunnelManager), and endpoint-only saved profiles.
+- RDP: see docs/RDP_FEASIBILITY.md (report only).

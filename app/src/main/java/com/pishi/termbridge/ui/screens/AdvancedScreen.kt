@@ -710,12 +710,18 @@ private fun TunnelSessionSection(
             } else {
                 stringResource(R.string.tunnel_kind_remote)
             }
-            Text(
-                text = "$kindLabel ${active.bindAddress}:${active.bindPort} → " +
-                    "${active.targetHost}:${active.targetPort}" +
-                    if (active.label.isNotBlank()) " (${active.label})" else "",
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "$kindLabel ${active.bindAddress}:${active.bindPort} → " +
+                        "${active.targetHost}:${active.targetPort}" +
+                        if (active.label.isNotBlank()) " (${active.label})" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { viewModel.stopTunnel(active.configId) }) {
+                    Text(text = stringResource(R.string.tunnel_stop_one))
+                }
+            }
         }
     }
 }

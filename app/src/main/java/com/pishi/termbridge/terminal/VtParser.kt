@@ -13,6 +13,9 @@ data class TerminalCell(
     val bold: Boolean = false
 )
 
+/** Cursor shapes, set by DECSCUSR or by the user's setting. */
+enum class CursorShape { BLOCK, UNDERLINE, BAR }
+
 data class TerminalSnapshot(
     /** Scrollback lines followed by visible screen lines. */
     val lines: List<List<TerminalCell>>,
@@ -20,7 +23,16 @@ data class TerminalSnapshot(
     val cursorCol: Int,
     val scrollbackCount: Int,
     /** Number of BEL characters received so far (for a haptic tick). */
-    val bellCount: Int = 0
+    val bellCount: Int = 0,
+    /** Cursor shape from the last DECSCUSR (item T-12). */
+    val cursorShape: CursorShape = CursorShape.BLOCK,
+    /** Whether the DECSCUSR shape blinks. */
+    val cursorBlinking: Boolean = false,
+    /** True once the remote app set the cursor style itself;
+     *  until then the user's setting is the effective one. */
+    val cursorStyleSetByApp: Boolean = false,
+    /** CSI ?25: applications may hide the cursor. */
+    val cursorVisible: Boolean = true
 )
 
 private enum class ParserState {
@@ -35,7 +47,8 @@ private enum class ParserState {
  * printable chars, CR, LF, backspace, tab, bell (ignored),
  * CSI cursor moves (A/B/C/D/H/f/d/G), erase in display (J) and
  * line (K), SGR colours/bold/reset (m), save/restore cursor (s/u,
- * ESC 7/8), and the alternate screen (CSI ?1049h / ?1049l,
+ * ESC 7/8), DECSCUSR cursor style (CSI Ps SP q) and cursor
+ * visibility (CSI ?25h/l), and the alternate screen (CSI ?1049h / ?1049l,
  * prompt 14 — this is what makes full-screen apps such as vim,
  * less, and htop usable: they draw on a separate screen, and
  * exiting restores the shell's screen exactly). Everything else
@@ -106,6 +119,35 @@ class VtParser(
     private var bellCount = 0
     private val csiParams = StringBuilder()
     private var csiPrivate = false
+    private var csiIntermediate: Char? = null
+    private var cursorShape = CursorShape.BLOCK
+    private var cursorBlinking = false
+    private var cursorStyleSetByApp = false
+    private var cursorVisible = true
+
+    /**
+     * Local clear (item T-19 shake action): blanks the visible
+     * screen and homes the cursor. On the main screen the
+     * scrollback is dropped too; on the alternate screen only
+     * the visible grid is blanked — the saved main screen and
+     * its scrollback are the shell's history, not the
+     * full-screen app's, and exiting the alternate screen
+     * restores them as usual. Any half-consumed escape sequence
+     * is abandoned (state back to GROUND), so a clear pressed
+     * mid-sequence cannot garble the next output.
+     */
+    fun clearScreenAndScrollback() {
+        if (savedMainScreen == null) {
+            scrollback.clear()
+        }
+        screen = newScreen()
+        cursorRow = 0
+        cursorCol = 0
+        state = ParserState.GROUND
+        csiParams.clear()
+        csiPrivate = false
+        csiIntermediate = null
+    }
 
     private fun newScreen(): MutableList<MutableList<TerminalCell>> {
         return MutableList(rows) { MutableList(cols) { TerminalCell() } }
@@ -176,6 +218,7 @@ class VtParser(
                 state = ParserState.CSI
                 csiParams.clear()
                 csiPrivate = false
+                csiIntermediate = null
             }
             ']' -> {
                 oscSawEsc = false
@@ -214,15 +257,20 @@ class VtParser(
     private fun csi(ch: Char) {
         when {
             ch == '?' && csiParams.isEmpty() -> csiPrivate = true
-            ch.code in 0x30..0x3F -> if (csiParams.length < MAX_CSI_PARAM_CHARS) csiParams.append(ch) // Params + intermediates; bounded so endless digits cannot grow it.
+            ch.code in 0x30..0x3F -> if (csiParams.length < MAX_CSI_PARAM_CHARS) csiParams.append(ch) // Params; bounded so endless digits cannot grow it.
+            ch.code in 0x20..0x2F -> {
+                // Intermediate bytes (e.g. the space in DECSCUSR
+                // "CSI 2 SP q"). Before this branch existed, the
+                // space aborted the sequence and the final byte
+                // was printed as text.
+                if (csiIntermediate == null) csiIntermediate = ch
+            }
             ch.code in 0x40..0x7E -> {
                 if (!csiPrivate) {
-                    executeCsi(ch, parseParams())
+                    executeCsi(ch, parseParams(), csiIntermediate)
                 } else {
                     executePrivate(ch, parseParams())
                 }
-                // Other private modes (e.g. ?25 cursor
-                // visibility) are consumed and ignored.
                 state = ParserState.GROUND
             }
             else -> state = ParserState.GROUND
@@ -230,12 +278,18 @@ class VtParser(
     }
 
     /**
-     * Private-mode finals. Only ?1049 (alternate screen) is
-     * acted on; every other private mode is ignored, as before.
-     * The parameter list may carry several modes at once
-     * (e.g. ?1049;25h); only 1049 matters here.
+     * Private-mode finals. ?25 (cursor visibility) and ?1049
+     * (alternate screen) are acted on; every other private mode
+     * is consumed and ignored. The parameter list may carry
+     * several modes at once (e.g. ?1049;25h).
      */
     private fun executePrivate(final: Char, params: List<Int>) {
+        if (25 in params) {
+            when (final) {
+                'h' -> cursorVisible = true
+                'l' -> cursorVisible = false
+            }
+        }
         if (1049 !in params) return
         when (final) {
             'h' -> {
@@ -274,7 +328,7 @@ class VtParser(
         return if (value == 0) default else value
     }
 
-    private fun executeCsi(final: Char, params: List<Int>) {
+    private fun executeCsi(final: Char, params: List<Int>, intermediate: Char? = null) {
         when (final) {
             // Review #2 F-07: Long arithmetic. `ESC[2147483647B` used to
             // overflow Int to a negative row, the next screen[row]
@@ -310,6 +364,44 @@ class VtParser(
                 2 -> screen[cursorRow] = blankLine()
             }
             'm' -> applySgr(if (params.isEmpty()) listOf(0) else params)
+            // DECSCUSR (item T-12): "CSI Ps SP q" — the space
+            // intermediate is what makes it this sequence; a
+            // bare 'q' final is not DECSCUSR and stays ignored.
+            'q' -> if (intermediate == ' ') {
+                when (param(params, 0, 1)) {
+                    0, 1 -> {
+                        cursorShape = CursorShape.BLOCK
+                        cursorBlinking = true
+                        cursorStyleSetByApp = true
+                    }
+                    2 -> {
+                        cursorShape = CursorShape.BLOCK
+                        cursorBlinking = false
+                        cursorStyleSetByApp = true
+                    }
+                    3 -> {
+                        cursorShape = CursorShape.UNDERLINE
+                        cursorBlinking = true
+                        cursorStyleSetByApp = true
+                    }
+                    4 -> {
+                        cursorShape = CursorShape.UNDERLINE
+                        cursorBlinking = false
+                        cursorStyleSetByApp = true
+                    }
+                    5 -> {
+                        cursorShape = CursorShape.BAR
+                        cursorBlinking = true
+                        cursorStyleSetByApp = true
+                    }
+                    6 -> {
+                        cursorShape = CursorShape.BAR
+                        cursorBlinking = false
+                        cursorStyleSetByApp = true
+                    }
+                    else -> Unit // Unknown style number: keep the current one.
+                }
+            }
             's' -> {
                 savedRow = cursorRow
                 savedCol = cursorCol
@@ -402,6 +494,10 @@ class VtParser(
         fg = -1
         bg = -1
         bold = false
+        cursorShape = CursorShape.BLOCK
+        cursorBlinking = false
+        cursorStyleSetByApp = false
+        cursorVisible = true
     }
 
     /** Truncate/pad one grid to the new size, without reflow. */
@@ -453,7 +549,11 @@ class VtParser(
             cursorRow = scrollback.size + cursorRow,
             cursorCol = cursorCol,
             scrollbackCount = scrollback.size,
-            bellCount = bellCount
+            bellCount = bellCount,
+            cursorShape = cursorShape,
+            cursorBlinking = cursorBlinking,
+            cursorStyleSetByApp = cursorStyleSetByApp,
+            cursorVisible = cursorVisible
         )
     }
 }

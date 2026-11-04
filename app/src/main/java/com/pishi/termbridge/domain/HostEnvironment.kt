@@ -44,7 +44,32 @@ data class HostEnvironmentSettings(
      * the backup format, so an imported host warns until its
      * environment screen is saved on this device.
      */
-    val shellConfirmed: Boolean = false
+    val shellConfirmed: Boolean = false,
+    /**
+     * Item F-02: the user's opt-in consent to the shell-export
+     * fallback — when the server refuses a variable through the
+     * SSH env channel (its sshd has no matching AcceptEnv), the
+     * app types one visible export line per refused variable
+     * into the fresh shell instead (see domain/ExportCommand).
+     * Default false; the fallback additionally requires
+     * [shellConfirmed], because typing export lines assumes the
+     * shell dialect exactly like command buttons do. Like
+     * shellConfirmed this is a device-local consent: it is NOT
+     * carried in the backup format, so an imported host has it
+     * off until the user turns it on here.
+     */
+    val envExportFallback: Boolean = false,
+    /**
+     * Item T-03: record a local session transcript for this
+     * host. Opt-in, off by default; the transcript is scrubbed
+     * line by line, capped and rotated on device, and never
+     * leaves the device unless [sessionLogInBackup] is also on
+     * AND the backup is encrypted.
+     */
+    val sessionLogEnabled: Boolean = false,
+    /** Item T-03: include this host's transcript in encrypted
+     *  backups. Meaningless while [sessionLogEnabled] is off. */
+    val sessionLogInBackup: Boolean = false
 )
 
 /** One stored env var, for list UI. Carries a NAME ONLY — never a

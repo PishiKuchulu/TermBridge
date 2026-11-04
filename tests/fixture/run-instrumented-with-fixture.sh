@@ -40,6 +40,8 @@ bash tests/fixture/setup-sshd-fixture.sh
 # Public-key user's private key, as one base64 line (instrumentation
 # arguments cannot carry newlines). Per-run, never committed.
 FIXTURE_KEY_B64="$(sudo base64 -w0 /tmp/termbridge-sshd-fixture/client_key)"
+FIXTURE_RSA_KEY_B64="$(sudo base64 -w0 /tmp/termbridge-sshd-fixture/client_key_rsa)"
+export FIXTURE_RSA_KEY_B64
 FIXTURE_VNC_PASS="$(cat /tmp/termbridge-vnc-pass 2>/dev/null || true)"
 
 # Review #2 F-17: the per-run secrets travel as instrumentation
@@ -51,7 +53,7 @@ scrub_secrets() {
     [ -d "$d" ] || continue
     FIXTURE_PASSWORD="$FIXTURE_PASSWORD" FIXTURE_KEY_B64="$FIXTURE_KEY_B64" FIXTURE_VNC_PASS="$FIXTURE_VNC_PASS" python3 - "$d" <<'PYEOF' || true
 import os, sys
-secrets = [v for v in (os.environ.get("FIXTURE_PASSWORD", ""), os.environ.get("FIXTURE_KEY_B64", ""), os.environ.get("FIXTURE_VNC_PASS", "")) if v]
+secrets = [v for v in (os.environ.get("FIXTURE_PASSWORD", ""), os.environ.get("FIXTURE_KEY_B64", ""), os.environ.get("FIXTURE_RSA_KEY_B64", ""), os.environ.get("FIXTURE_VNC_PASS", "")) if v]
 for root, _, files in os.walk(sys.argv[1]):
     for name in files:
         path = os.path.join(root, name)
@@ -149,8 +151,12 @@ while [ "$ATTEMPT" -le 3 ]; do
     -Pandroid.testInstrumentationRunnerArguments.fixture_password="$FIXTURE_PASSWORD" \
     -Pandroid.testInstrumentationRunnerArguments.fixture_key_user=termbridge-key \
     -Pandroid.testInstrumentationRunnerArguments.fixture_key_b64="$FIXTURE_KEY_B64" \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_rsa_key_b64="$FIXTURE_RSA_KEY_B64" \
     -Pandroid.testInstrumentationRunnerArguments.fixture_vnc_pass="$FIXTURE_VNC_PASS" \
-    -Pandroid.testInstrumentationRunnerArguments.fixture_vnc_port=5901 2>&1 | tee "gradle-attempt-$ATTEMPT.log"
+    -Pandroid.testInstrumentationRunnerArguments.fixture_vnc_port=5901 \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_bastion_port=2223 \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_echo_port=18081 \
+    -Pandroid.testInstrumentationRunnerArguments.fixture_socks_port=10809 2>&1 | tee "gradle-attempt-$ATTEMPT.log"
   GRADLE_RC=${PIPESTATUS[0]}
   if [ "$GRADLE_RC" -eq 0 ]; then
     break

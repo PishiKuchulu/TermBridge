@@ -23,6 +23,24 @@ interface HostDao {
 
     @Query("DELETE FROM hosts WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /** Item T-22: stamp the last successful connection without
+     *  touching any other column (in particular not the
+     *  credential blob). */
+    @Query("UPDATE hosts SET lastConnectedAt = :atMs WHERE id = :id")
+    suspend fun touchLastConnected(id: Long, atMs: Long)
+
+    /** Item T-22: favorite toggle from the list — a one-column
+     *  update, never a full save (a full save would re-run the
+     *  credential rules for a pure display change). */
+    @Query("UPDATE hosts SET favorite = :favorite WHERE id = :id")
+    suspend fun setFavorite(id: Long, favorite: Boolean)
+
+    @Query("SELECT COUNT(*) FROM hosts WHERE keychainEntryId = :entryId")
+    suspend fun countByKeychainEntryId(entryId: Long): Int
+
+    @Query("UPDATE hosts SET keychainEntryId = NULL WHERE keychainEntryId = :entryId")
+    suspend fun clearKeychainEntryId(entryId: Long)
 }
 
 @Dao

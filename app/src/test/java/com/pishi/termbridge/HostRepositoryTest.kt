@@ -2,6 +2,7 @@ package com.pishi.termbridge
 
 import com.pishi.termbridge.data.HostRepository
 import com.pishi.termbridge.data.HostRepositoryException
+import com.pishi.termbridge.domain.wipe
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CredentialInput
 import com.pishi.termbridge.domain.HostProfile
@@ -40,6 +41,39 @@ class HostRepositoryTest {
         username = "admin",
         authType = AuthType.PASSWORD
     )
+
+    @Test
+    fun organizationFieldsSurviveSaveEditAndDuplicate() = runTest {
+        // Item T-22: favorite + group are saved and editable;
+        // lastConnectedAt is stamped by touch, preserved across
+        // edits, and NOT inherited by a duplicate.
+        val (repo, _, _) = repository()
+        val saved = repo.saveHost(
+            profile().copy(favorite = true, groupName = "Work"),
+            CredentialInput.Password("s3cr3t".toCharArray())
+        )
+        assertTrue(repo.getHost(saved.id)!!.favorite)
+        assertEquals("Work", repo.getHost(saved.id)!!.groupName)
+        assertNull(repo.getHost(saved.id)!!.lastConnectedAt)
+
+        repo.touchLastConnected(saved.id, 123456789L)
+        assertEquals(123456789L, repo.getHost(saved.id)!!.lastConnectedAt)
+
+        // An edit that does not mention the stamp keeps it.
+        val edited = repo.saveHost(
+            repo.getHost(saved.id)!!.copy(name = "Renamed"),
+            credential = null
+        )
+        assertEquals(123456789L, repo.getHost(edited.id)!!.lastConnectedAt)
+
+        repo.setFavorite(saved.id, false)
+        assertFalse(repo.getHost(saved.id)!!.favorite)
+
+        val copy = repo.duplicateHost(saved.id, "Copy")
+        assertEquals("Work", copy.groupName)
+        assertNull(copy.lastConnectedAt)
+        assertNull(repo.getHost(copy.id)!!.lastConnectedAt)
+    }
 
     @Test
     fun saveEncryptsCredentialAndLoadReturnsIt() = runTest {
@@ -204,4 +238,44 @@ class HostRepositoryTest {
         repo.clearTrustedKey("example.com:22")
         assertNull(repo.getTrustedFingerprint("example.com:22"))
     }
+
+    @Test
+    fun legacyCredentialBlobMigratesToBoundFormatOnLoad() = runTest {
+        // Item R-02: a pre-v2 blob (no version byte, no AAD)
+        // still loads, the stored row is upgraded in place, and
+        // the upgraded blob no longer decrypts under another
+        // host's context.
+        val hostDao = FakeHostDao()
+        val crypto = FakeSecretCrypto()
+        val repo = HostRepository(hostDao, FakeTrustedHostKeyDao(), crypto)
+        val saved = repo.saveHost(
+            profile(), CredentialInput.Password("s3cr3t".toCharArray())
+        )
+        val row = hostDao.getById(saved.id)!!
+        hostDao.update(
+            row.copy(
+                credentialBlob =
+                    crypto.legacyEncrypt("s3cr3t".toByteArray(Charsets.UTF_8))
+            )
+        )
+        val loaded = repo.loadCredential(saved.id)!!
+        assertArrayEquals("s3cr3t".toByteArray(Charsets.UTF_8), loaded)
+        loaded.wipe()
+        val upgraded = hostDao.getById(saved.id)!!.credentialBlob!!
+        assertFalse(crypto.isLegacyBlob(upgraded))
+
+        val other = repo.saveHost(
+            profile().copy(name = "Other host"),
+            CredentialInput.Password("other-pw".toCharArray())
+        )
+        val otherRow = hostDao.getById(other.id)!!
+        hostDao.update(otherRow.copy(credentialBlob = upgraded))
+        try {
+            repo.loadCredential(other.id)
+            fail("A transplanted blob must not decrypt.")
+        } catch (expected: HostRepositoryException) {
+            // Bound to the original host — correct.
+        }
+    }
+
 }

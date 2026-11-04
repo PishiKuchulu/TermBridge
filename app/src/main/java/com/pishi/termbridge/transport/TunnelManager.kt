@@ -103,11 +103,16 @@ class SshTunnelManager {
                         "The port may already be in use."
                 )
             }
+            // Item F-03b: bindPort 0 means "any free port" — the
+            // RESOLVED port is what the forwarder and the active
+            // record must carry (the VNC-over-SSH flow connects
+            // to it and cannot guess it).
+            val boundPort = serverSocket.localPort
             val forwarder = try {
                 client.newLocalPortForwarder(
                     Parameters(
                         config.bindAddress,
-                        config.bindPort,
+                        boundPort,
                         config.targetHost,
                         config.targetPort
                     ),
@@ -143,7 +148,7 @@ class SshTunnelManager {
                     }
                 }
             }
-            val activeTunnel = config.toActive()
+            val activeTunnel = config.copy(bindPort = boundPort).toActive()
             activeMap[config.id] = activeTunnel
             refresh()
             activeTunnel
@@ -178,36 +183,41 @@ class SshTunnelManager {
         }
     }
 
-    /** Stop every forward. Call before disconnecting the client.
-     *  Session-wide stop is the only stop path in this phase —
-     *  there is no per-tunnel stop button in the UI, so no
-     *  per-tunnel stop method is offered here either. */
-    fun stopAll(connection: SshConnection?) {
+    /** Item T-20: stop ONE forward; the rest keep running.
+     *  The Advanced screen has a per-forward stop button backed
+     *  by this. Removal from the registries happens BEFORE the
+     *  forwarder closes, so the local listen loop's exit handler
+     *  sees an unregistered forwarder and stays quiet (the
+     *  security-fix-16 invariant). */
+    fun stop(connection: SshConnection?, configId: Long) {
         val client = try {
             connection?.let { clientFor(it) }
         } catch (_: Exception) {
             null
         }
+        localForwarders.remove(configId)?.let { forwarder ->
+            try {
+                forwarder.close()
+            } catch (_: Exception) {
+            }
+        }
+        localJobs.remove(configId)?.cancel()
+        val forward = remoteForwards.remove(configId)
+        if (forward != null && client != null) {
+            try {
+                client.remotePortForwarder.cancel(forward)
+            } catch (_: Exception) {
+            }
+        }
+        activeMap.remove(configId)
+        refresh()
+    }
+
+    /** Stop every forward. Call before disconnecting the client. */
+    fun stopAll(connection: SshConnection?) {
         val ids = activeMap.keys.toList()
         for (id in ids) {
-            localForwarders.remove(id)?.let { forwarder ->
-                try {
-                    forwarder.close()
-                } catch (_: Exception) {
-                }
-            }
-            localJobs.remove(id)?.cancel()
-            if (client != null) {
-                remoteForwards.remove(id)?.let { forward ->
-                    try {
-                        client.remotePortForwarder.cancel(forward)
-                    } catch (_: Exception) {
-                    }
-                }
-            } else {
-                remoteForwards.remove(id)
-            }
-            activeMap.remove(id)
+            stop(connection, id)
         }
         refresh()
     }

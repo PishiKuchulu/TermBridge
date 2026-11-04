@@ -15,6 +15,8 @@ object Routes {
     const val VAULT = "vault"
     const val CONNECTIONS = "connections"
     const val KNOWN_HOSTS = "known_hosts"
+    const val KEYCHAIN = "keychain"
+    const val THEMES = "themes"
     const val LOGS = "logs"
     const val DISCOVER = "discover"
     const val HOST_FORM_PREFILL = "host_form_prefill/{prefill}"

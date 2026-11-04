@@ -23,13 +23,23 @@ history; it no longer describes the whole suite.
   button insert-never-executes (proven by file absence),
   env accepted/rejected reporting, working-directory pwd,
   SFTP download landing in a local folder.
-- Still blocked (6 tests, each @Ignore'd with its own reason):
+- Still blocked (1 test, @Ignore'd with its reason):
   changed host key (needs fixture-side key rotation on the
-  SAME endpoint), local forward (needs a fixture echo
-  service), remote forward (needs a fixture-side service),
-  jump chain (needs a second fixture sshd as bastion),
-  SOCKS proxy (needs a fixture SOCKS proxy), partial tunnel
-  failure (needs a fixture that rejects one forward).
+  SAME endpoint — item R-10).
+- Item T-20 update (2026-11-04): the five forwarding cases
+  are IMPLEMENTED. The fixture now also provisions a bastion
+  sshd (port 2223), a python3 TCP echo service (18081) and a
+  python3 no-auth SOCKS5 proxy (10809), and both sshd configs
+  state AllowTcpForwarding yes; the wrapper passes the three
+  ports as instrumentation arguments and the tests skip only
+  when they are absent. The cases: local forward + per-forward
+  stop, remote forward + cancel, jump chain + target-reject,
+  SOCKS (proven by dialling "localhost", which only the
+  host-side proxy can reach), and partial failure (a remote
+  forward onto the echo port is refused; the app's
+  close-on-any-failure rule then frees the started forward).
+  These tests are compile-proven locally; their first live
+  run is the CI instrumented job of the push carrying them.
 - Correction to an old premise: SftpManager has NO
   working-directory concept — paths are absolute only. The
   old test #12 premise ("SFTP starts in the working
@@ -81,3 +91,15 @@ integration-blocked. The first real-server run — by the user on a
 real device against a real server, or by CI once the fixture
 exists — is the proof that closes this item, and it must be
 reported with the server type and result, not assumed.
+
+## Update, 2026-11-04 — item R-10
+
+The changed-host-key case no longer needs a fixture
+restart hook: the bastion sshd now presents its OWN host
+keys, and `changedHostKeyFlow` dials a test-local loopback
+relay that is re-pointed from the main sshd to the bastion
+mid-test — the dialed endpoint is constant, the presented
+key changes. An RSA-3072 client-key case
+(`rsaSha2ClientKeyAuthenticates`) was added alongside.
+All 21 SshIntegrationTest cases are implemented; none is
+@Ignore'd. First live run: the CI run of the G0–G7 push.

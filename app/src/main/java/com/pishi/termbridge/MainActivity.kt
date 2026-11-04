@@ -28,14 +28,51 @@ import com.pishi.termbridge.ui.theme.TermBridgeTheme
  * (default on) and covers the whole app, because this is the app's
  * only activity.
  *
- * App lock: when a PIN is set, a full-screen overlay hides the app on
- * a cold start and after the app has been in the background for more
- * than [LOCK_GRACE_MS]. The grace period keeps the system file picker
- * (a separate activity) from re-locking the app on every return.
+ * App lock: when a lock is set (PIN or pattern, item T-18), a
+ * full-screen overlay hides the app on a cold start and after the
+ * app has been in the background for longer than the user's
+ * auto-lock delay (AppLockStore; 30 seconds by default). The
+ * delay keeps the system file picker (a separate activity) from
+ * re-locking the app on every return.
  */
 class MainActivity : FragmentActivity() {
     private var locked by mutableStateOf(false)
     private var stoppedAt = 0L
+
+    /** Volume-key handler registered by the app while the
+     *  session route is showing (item T-19); null everywhere
+     *  else, where the keys keep their system behaviour. */
+    private var volumeKeyHandler: ((com.pishi.termbridge.domain.VolumeKey, Boolean) -> Boolean)? = null
+    private var volumeDownConsumed = false
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        val key = when (keyCode) {
+            android.view.KeyEvent.KEYCODE_VOLUME_UP ->
+                com.pishi.termbridge.domain.VolumeKey.UP
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN ->
+                com.pishi.termbridge.domain.VolumeKey.DOWN
+            else -> null
+        }
+        if (key != null) {
+            val consumed = volumeKeyHandler?.invoke(key, (event?.repeatCount ?: 0) > 0) == true
+            if (consumed) {
+                volumeDownConsumed = true
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if ((keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+                keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) &&
+            volumeDownConsumed
+        ) {
+            volumeDownConsumed = false
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,20 +81,28 @@ class MainActivity : FragmentActivity() {
         locked = app.appLock.enabled.value
         // Apply the stored choice before the first frame (no window in
         // which a protected screen is briefly capturable).
-        if (app.appSettings.settings.value.blockScreenshots) {
+        if (app.appSettings.settings.value.blockScreenshots ||
+            (app.appLock.enabled.value && app.appLock.coverRecents.value)
+        ) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
         setContent {
             val prefs by app.appSettings.settings.collectAsState()
-            LaunchedEffect(prefs.blockScreenshots) {
-                if (prefs.blockScreenshots) {
+            val lockEnabled by app.appLock.enabled.collectAsState()
+            val biometricOn by app.appLock.biometric.collectAsState()
+            val lockMethod by app.appLock.method.collectAsState()
+            val autoLockDelay by app.appLock.autoLockDelayMs.collectAsState()
+            val coverRecents by app.appLock.coverRecents.collectAsState()
+            // FLAG_SECURE covers screenshots AND the recents card:
+            // either the screenshots setting, or the app lock with
+            // its cover-in-recents preference (item T-18).
+            LaunchedEffect(prefs.blockScreenshots, lockEnabled, coverRecents) {
+                if (prefs.blockScreenshots || (lockEnabled && coverRecents)) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 } else {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 }
             }
-            val lockEnabled by app.appLock.enabled.collectAsState()
-            val biometricOn by app.appLock.biometric.collectAsState()
             val biometricAvailable = remember { BiometricHelper.isAvailable(this@MainActivity) }
             val lockSettings = LockSettingsUi(
                 enabled = lockEnabled,
@@ -72,7 +117,23 @@ class MainActivity : FragmentActivity() {
                         false
                     }
                 },
-                setBiometric = { on -> app.appLock.setBiometric(on) }
+                setBiometric = { on -> app.appLock.setBiometric(on) },
+                method = lockMethod,
+                setPattern = { points -> app.appLock.setPattern(points) },
+                disableWithPattern = { points ->
+                    if (app.appLock.verifyPattern(points) == UnlockResult.Success) {
+                        app.appLock.disable()
+                        true
+                    } else {
+                        false
+                    }
+                },
+                autoLockChoicesMs = com.pishi.termbridge.settings.AppLockStore.AUTO_LOCK_CHOICES,
+                autoLockDelayMs = autoLockDelay,
+                setAutoLockDelay = { ms -> app.appLock.setAutoLockDelay(ms) },
+                coverRecents = coverRecents,
+                setCoverRecents = { on -> app.appLock.setCoverRecents(on) },
+                lockNow = { locked = true }
             )
             val promptTitle = getString(R.string.lock_biometric_title)
             val promptCancel = getString(R.string.action_cancel)
@@ -84,9 +145,18 @@ class MainActivity : FragmentActivity() {
                         environmentRepository = app.environmentRepository,
                         advancedRepository = app.advancedRepository,
                         backupService = app.backupService,
+                        keychainRepository = app.keychainRepository,
+                        snippetRepository = app.snippetRepository,
+                        customThemeRepository = app.customThemeRepository,
+                        desktopProfileRepository = app.desktopProfileRepository,
+                        transcriptStore = app.transcriptStore,
+                        commandHistoryStore = app.commandHistoryStore,
                         appSettings = app.appSettings,
                         connectionLog = app.connectionLog,
-                        lockSettings = lockSettings
+                        lockSettings = lockSettings,
+                        onRegisterVolumeKeyHandler = { handler ->
+                            volumeKeyHandler = handler
+                        }
                     )
                     if (locked && lockEnabled) {
                         LockScreen(
@@ -114,13 +184,9 @@ class MainActivity : FragmentActivity() {
         super.onStart()
         val app = application as TermBridgeApplication
         if (stoppedAt > 0L && app.appLock.enabled.value &&
-            SystemClock.elapsedRealtime() - stoppedAt > LOCK_GRACE_MS
+            SystemClock.elapsedRealtime() - stoppedAt > app.appLock.autoLockDelayMs.value
         ) {
             locked = true
         }
-    }
-
-    private companion object {
-        const val LOCK_GRACE_MS = 30_000L
     }
 }

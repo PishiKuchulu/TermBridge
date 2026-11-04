@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -38,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.pishi.termbridge.R
@@ -62,9 +65,15 @@ import com.pishi.termbridge.ui.viewmodel.FilesViewModel
  * Local access is SAF only: upload sources and download
  * destinations are user-picked URIs. No broad storage permission
  * is requested. Transfers stream and report progress; cancel
- * stops them; partial downloads are deleted best-effort.
- * Delete is single-entry only — a non-empty directory cannot be
- * deleted here (no recursive delete in prompt 07).
+ * stops them. Item T-21: transfers run through a queue
+ * (multi-select, folder up/download), the listing can be
+ * searched, sorted and shown with hidden files, an interrupted
+ * download keeps its partial file and offers resume (as does a
+ * cancelled single upload, from its server-side temp), and a
+ * completed download offers Open / Share. Partial files from
+ * non-resumable failures are still deleted best-effort.
+ * Delete stays non-recursive — a non-empty directory cannot be
+ * deleted here.
  */
 @Composable
 fun FilesScreen(
@@ -80,11 +89,20 @@ fun FilesScreen(
     var deleteTarget by remember { mutableStateOf<TransportRemoteEntry?>(null) }
     var showMkdir by remember { mutableStateOf(false) }
     var mkdirName by remember { mutableStateOf("") }
+    // Item T-21: multi-select mode + its delete confirmation.
+    var selectMode by remember { mutableStateOf(false) }
+    var showBulkDelete by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val uploadLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) viewModel.onUploadsPicked(uris)
+    }
+    val uploadFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        if (uri != null) viewModel.onUploadPicked(uri)
+        if (uri != null) viewModel.onUploadFolderPicked(uri)
     }
     val downloadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -171,6 +189,34 @@ fun FilesScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showMkdir = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+    if (showBulkDelete) {
+        AlertDialog(
+            onDismissRequest = { showBulkDelete = false },
+            title = { Text(stringResource(R.string.files_delete_selected_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.files_delete_selected_body,
+                        uiState.selectedPaths.size
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteSelected()
+                        showBulkDelete = false
+                        selectMode = false
+                    }
+                ) { Text(stringResource(R.string.action_delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkDelete = false }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             }
@@ -331,10 +377,95 @@ fun FilesScreen(
                 )
             }
             Spacer(modifier = Modifier.height(Spacing.small))
-            SecondaryAction(
-                label = stringResource(R.string.session_disconnect),
-                onClick = { viewModel.disconnect() }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SecondaryAction(
+                    label = stringResource(R.string.files_upload_folder),
+                    onClick = { uploadFolderLauncher.launch(null) }
+                )
+                Spacer(modifier = Modifier.padding(end = Spacing.small))
+                SecondaryAction(
+                    label = stringResource(R.string.session_disconnect),
+                    onClick = { viewModel.disconnect() }
+                )
+            }
+            // Item T-21: search, sort, hidden files, select mode.
+            Spacer(modifier = Modifier.height(Spacing.small))
+            OutlinedTextField(
+                value = uiState.query,
+                onValueChange = { viewModel.setQuery(it) },
+                label = { Text(stringResource(R.string.files_search)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
             )
+            Spacer(modifier = Modifier.height(Spacing.small))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.cycleSort() },
+                    label = {
+                        Text(
+                            stringResource(
+                                R.string.files_sort,
+                                stringResource(
+                                    when (uiState.sort) {
+                                        com.pishi.termbridge.transport.RemoteSort.SIZE ->
+                                            R.string.files_sort_size
+                                        com.pishi.termbridge.transport.RemoteSort.TYPE ->
+                                            R.string.files_sort_type
+                                        else -> R.string.files_sort_name
+                                    }
+                                )
+                            )
+                        )
+                    }
+                )
+                Spacer(modifier = Modifier.padding(end = Spacing.small))
+                FilterChip(
+                    selected = uiState.showHidden,
+                    onClick = { viewModel.setShowHidden(!uiState.showHidden) },
+                    label = { Text(stringResource(R.string.files_show_hidden)) }
+                )
+                Spacer(modifier = Modifier.padding(end = Spacing.small))
+                FilterChip(
+                    selected = selectMode,
+                    onClick = {
+                        selectMode = !selectMode
+                        if (!selectMode) viewModel.clearSelection()
+                    },
+                    label = { Text(stringResource(R.string.files_action_select)) }
+                )
+            }
+            if (selectMode) {
+                Spacer(modifier = Modifier.height(Spacing.small))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(
+                            R.string.files_selected_count,
+                            uiState.selectedPaths.size
+                        ),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.padding(end = Spacing.small))
+                    SecondaryAction(
+                        label = stringResource(R.string.files_download_selected),
+                        onClick = { viewModel.downloadSelectedToLocalFolder() },
+                        enabled = uiState.selectedPaths.isNotEmpty() &&
+                            uiState.localFolderAvailable
+                    )
+                    Spacer(modifier = Modifier.padding(end = Spacing.small))
+                    SecondaryAction(
+                        label = stringResource(R.string.action_delete),
+                        onClick = { showBulkDelete = true },
+                        enabled = uiState.selectedPaths.isNotEmpty()
+                    )
+                }
+                if (!uiState.localFolderAvailable) {
+                    Text(
+                        text = stringResource(R.string.files_bulk_download_needs_folder),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
             uiState.transfer?.let { transfer ->
                 Spacer(modifier = Modifier.height(Spacing.medium))
                 // Prompt 14: the direction token ("Upload" /
@@ -366,6 +497,111 @@ fun FilesScreen(
                     label = stringResource(R.string.action_cancel),
                     onClick = { viewModel.cancelTransfer() }
                 )
+                if (uiState.queueRemaining > 0) {
+                    Spacer(modifier = Modifier.height(Spacing.small))
+                    Text(
+                        text = stringResource(
+                            R.string.files_queue_more, uiState.queueRemaining
+                        ),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            // Item T-21: resume offers for interrupted transfers.
+            uiState.resumableDownload?.let { resumable ->
+                Spacer(modifier = Modifier.height(Spacing.small))
+                Text(
+                    text = stringResource(
+                        R.string.files_resume_download,
+                        resumable.entryName,
+                        formatSize(resumable.bytesDone)
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SecondaryAction(
+                        label = stringResource(R.string.files_resume),
+                        onClick = { viewModel.resumeDownload() }
+                    )
+                    Spacer(modifier = Modifier.padding(end = Spacing.small))
+                    SecondaryAction(
+                        label = stringResource(R.string.files_resume_discard),
+                        onClick = { viewModel.discardResumableDownload() }
+                    )
+                }
+            }
+            uiState.resumableUploadName?.let { name ->
+                Spacer(modifier = Modifier.height(Spacing.small))
+                Text(
+                    text = stringResource(R.string.files_resume_upload, name),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SecondaryAction(
+                        label = stringResource(R.string.files_resume),
+                        onClick = { viewModel.resumeUpload() }
+                    )
+                    Spacer(modifier = Modifier.padding(end = Spacing.small))
+                    SecondaryAction(
+                        label = stringResource(R.string.files_resume_discard),
+                        onClick = { viewModel.discardResumableUpload() }
+                    )
+                }
+            }
+            // Item T-21: open / share the last downloaded file.
+            uiState.lastDownloaded?.let { downloaded ->
+                Spacer(modifier = Modifier.height(Spacing.small))
+                Text(
+                    text = stringResource(R.string.files_downloaded, downloaded.name),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SecondaryAction(
+                        label = stringResource(R.string.files_open),
+                        onClick = {
+                            val uri = android.net.Uri.parse(downloaded.uriString)
+                            val mime = android.webkit.MimeTypeMap.getSingleton()
+                                .getMimeTypeFromExtension(
+                                    downloaded.name.substringAfterLast('.', "")
+                                        .lowercase()
+                                ) ?: "*/*"
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW
+                            ).apply {
+                                setDataAndType(uri, mime)
+                                addFlags(
+                                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                )
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.padding(end = Spacing.small))
+                    SecondaryAction(
+                        label = stringResource(R.string.files_share),
+                        onClick = {
+                            val uri = android.net.Uri.parse(downloaded.uriString)
+                            val send = android.content.Intent(
+                                android.content.Intent.ACTION_SEND
+                            ).apply {
+                                type = "*/*"
+                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                addFlags(
+                                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                )
+                            }
+                            try {
+                                context.startActivity(
+                                    android.content.Intent.createChooser(send, null)
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                    )
+                }
             }
             uiState.errorMessage?.let {
                 Spacer(modifier = Modifier.height(Spacing.small))
@@ -382,12 +618,22 @@ fun FilesScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = entry.isDirectory) {
-                                viewModel.navigateInto(entry)
+                            .clickable {
+                                if (selectMode) {
+                                    viewModel.toggleSelected(entry)
+                                } else if (entry.isDirectory) {
+                                    viewModel.navigateInto(entry)
+                                }
                             }
                             .padding(horizontal = Spacing.medium, vertical = Spacing.small),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        if (selectMode) {
+                            Checkbox(
+                                checked = entry.path in uiState.selectedPaths,
+                                onCheckedChange = { viewModel.toggleSelected(entry) }
+                            )
+                        }
                         Icon(
                             imageVector = if (entry.isDirectory) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
                             contentDescription = null
@@ -404,39 +650,54 @@ fun FilesScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (!entry.isDirectory) {
+                        if (!selectMode) {
+                            if (!entry.isDirectory) {
+                                IconButton(
+                                    onClick = {
+                                        if (uiState.localFolderAvailable) {
+                                            viewModel.downloadToLocalFolder(entry)
+                                        } else {
+                                            viewModel.prepareDownload(entry)
+                                            downloadLauncher.launch(entry.name)
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Download,
+                                        contentDescription = stringResource(R.string.files_download)
+                                    )
+                                }
+                            } else if (uiState.localFolderAvailable) {
+                                // Item T-21: whole-folder download
+                                // into the host's local folder.
+                                IconButton(
+                                    onClick = {
+                                        viewModel.downloadFolderToLocalFolder(entry)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Download,
+                                        contentDescription = stringResource(R.string.files_download)
+                                    )
+                                }
+                            }
                             IconButton(
                                 onClick = {
-                                    if (uiState.localFolderAvailable) {
-                                        viewModel.downloadToLocalFolder(entry)
-                                    } else {
-                                        viewModel.prepareDownload(entry)
-                                        downloadLauncher.launch(entry.name)
-                                    }
+                                    renameTarget = entry
+                                    renameName = entry.name
                                 }
                             ) {
                                 Icon(
-                                    imageVector = Icons.Filled.Download,
-                                    contentDescription = stringResource(R.string.files_download)
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = stringResource(R.string.files_rename)
                                 )
                             }
-                        }
-                        IconButton(
-                            onClick = {
-                                renameTarget = entry
-                                renameName = entry.name
+                            IconButton(onClick = { deleteTarget = entry }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Delete,
+                                    contentDescription = stringResource(R.string.files_delete)
+                                )
                             }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = stringResource(R.string.files_rename)
-                            )
-                        }
-                        IconButton(onClick = { deleteTarget = entry }) {
-                            Icon(
-                                imageVector = Icons.Filled.Delete,
-                                contentDescription = stringResource(R.string.files_delete)
-                            )
                         }
                     }
                 }

@@ -10,12 +10,18 @@ stated otherwise.
   bell (ignored), NUL (ignored).
 - CSI cursor moves: A/B/C/D, H/f (position), d (row), G (column),
   save/restore (s/u, ESC 7/8).
+- Cursor style (2026-11-04, item T-12): DECSCUSR (CSI Ps SP q —
+  blinking/steady block, underline, bar) and cursor visibility
+  (CSI ?25h/l). Until an app sets a style, the user's Settings
+  default (shape + blink) applies; a full reset (ESC c) returns
+  to the user default.
 - Erase: J (0/1/2/3, including scrollback clear on J 3), K (0/1/2).
 - SGR: reset (0), bold (1, 22), standard colours (30–37, 40–47),
   bright colours (90–97, 100–107), default colours (39, 49).
   Extended colours (38/48, 256-colour and true-colour) are parsed
   and ignored — text renders in the default colour.
-- Scrollback: 1,000 lines, oldest dropped first. Total memory is
+- Scrollback: user-configurable, 100–50,000 lines (default
+  1,000; item T-23), oldest dropped first. Total memory is
   bounded by scrollback + screen size.
 - Alternate screen (CSI ?1049h / ?1049l, prompt 14): entering
   saves the main screen grid, cursor, and saved-cursor slot and
@@ -41,9 +47,9 @@ stated otherwise.
 - Input: typed characters sent as typed, Enter (CR), Ctrl-C
   (0x03), Ctrl-D (0x04), Tab, Escape, arrow keys (CSI A/B/C/D),
   backspace (DEL 0x7F).
-- Selection/copy: the terminal display is wrapped in a
-  SelectionContainer, so displayed text can be copied with the
-  system selection UI.
+- Selection/copy: the Canvas renderer (2026-11-04, item Q-03)
+  supports long-press drag selection with a Copy action, and
+  tap-to-open for http(s) URLs drawn underlined.
 - Paste: never sent automatically. A paste (button or field)
   opens a confirmation dialog showing the exact text; only an
   explicit Send tap submits it, including any newlines.
@@ -56,10 +62,10 @@ stated otherwise.
   program — most full-screen apps use ?1049).
 - Mouse reporting, bracketed paste, focus events: ignored.
 - Reflow on resize: lines are truncated/padded, not reflowed.
-  The PTY size is approximated from the measured display area
-  (~8dp per char, ~20dp per line at 13sp) — on unusual fonts or
-  densities the PTY size and the display grid may differ by a
-  column or two.
+  The PTY size is measured, not approximated (2026-11-04, item
+  Q-02): the real monospace cell is measured with the same text
+  style the grid is drawn with, and the exact cols/rows are
+  sent to the shell.
 - UTF-8: decoded correctly via InputStreamReader (multi-byte
   characters split across reads are handled). Combining characters
   and wide (East Asian) characters are treated as one cell each,

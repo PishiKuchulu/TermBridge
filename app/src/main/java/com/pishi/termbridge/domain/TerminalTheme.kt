@@ -38,6 +38,52 @@ object TerminalThemes {
             0xFF616161, 0xFFD32F2F, 0xFF2E7D32, 0xFFA67C00, 0xFF1976D2, 0xFFAB47BC, 0xFF00897B, 0xFF424242
         )
     )
-    val all: List<TerminalTheme> = listOf(CLASSIC, SOLARIZED, LIGHT)
+    val DRACULA = TerminalTheme(
+        id = "dracula", label = "Dracula",
+        background = 0xFF282A36, foreground = 0xFFF8F8F2, cursor = 0xFFF8F8F2,
+        ansi = listOf(
+            0xFF21222C, 0xFFFF5555, 0xFF50FA7B, 0xFFF1FA8C, 0xFFBD93F9, 0xFFFF79C6, 0xFF8BE9FD, 0xFFF8F8F2,
+            0xFF6272A4, 0xFFFF6E6E, 0xFF69FF94, 0xFFFFFFA5, 0xFFD6ACFF, 0xFFFF92DF, 0xFFA4FFFF, 0xFFFFFFFF
+        )
+    )
+    val NORD = TerminalTheme(
+        id = "nord", label = "Nord",
+        background = 0xFF2E3440, foreground = 0xFFD8DEE9, cursor = 0xFFD8DEE9,
+        ansi = listOf(
+            0xFF3B4252, 0xFFBF616A, 0xFFA3BE8C, 0xFFEBCB8B, 0xFF81A1C1, 0xFFB48EAD, 0xFF88C0D0, 0xFFE5E9F0,
+            0xFF4C566A, 0xFFBF616A, 0xFFA3BE8C, 0xFFEBCB8B, 0xFF81A1C1, 0xFFB48EAD, 0xFF8FBCBB, 0xFFECEFF4
+        )
+    )
+    val GRUVBOX = TerminalTheme(
+        id = "gruvbox", label = "Gruvbox dark",
+        background = 0xFF282828, foreground = 0xFFEBDBB2, cursor = 0xFFEBDBB2,
+        ansi = listOf(
+            0xFF282828, 0xFFCC241D, 0xFF98971A, 0xFFD79921, 0xFF458588, 0xFFB16286, 0xFF689D6A, 0xFFA89984,
+            0xFF928374, 0xFFFB4934, 0xFFB8BB26, 0xFFFABD2F, 0xFF83A598, 0xFFD3869B, 0xFF8EC07C, 0xFFEBDBB2
+        )
+    )
+    val MONOKAI = TerminalTheme(
+        id = "monokai", label = "Monokai",
+        background = 0xFF272822, foreground = 0xFFF8F8F2, cursor = 0xFFF8F8F2,
+        ansi = listOf(
+            0xFF272822, 0xFFF92672, 0xFFA6E22E, 0xFFF4BF75, 0xFF66D9EF, 0xFFAE81FF, 0xFFA1EFE4, 0xFFF8F8F2,
+            0xFF75715E, 0xFFF92672, 0xFFA6E22E, 0xFFF4BF75, 0xFF66D9EF, 0xFFAE81FF, 0xFFA1EFE4, 0xFFF9F8F5
+        )
+    )
+    val HIGH_CONTRAST = TerminalTheme(
+        id = "high-contrast", label = "High contrast",
+        background = 0xFF000000, foreground = 0xFFFFFFFF, cursor = 0xFFFFFF00,
+        ansi = listOf(
+            0xFF000000, 0xFFFF0000, 0xFF00FF00, 0xFFFFFF00, 0xFF00A0FF, 0xFFFF00FF, 0xFF00FFFF, 0xFFFFFFFF,
+            0xFF808080, 0xFFFF4040, 0xFF40FF40, 0xFFFFFF40, 0xFF40A0FF, 0xFFFF40FF, 0xFF40FFFF, 0xFFFFFFFF
+        )
+    )
+    val all: List<TerminalTheme> = listOf(
+        CLASSIC, SOLARIZED, LIGHT, DRACULA, NORD, GRUVBOX, MONOKAI, HIGH_CONTRAST
+    )
     fun byId(id: String): TerminalTheme = all.firstOrNull { it.id == id } ?: CLASSIC
+
+    /** Built-ins first-class, custom schemes (item T-08) win on id. */
+    fun resolve(id: String, customs: List<TerminalTheme>): TerminalTheme =
+        customs.firstOrNull { it.id == id } ?: byId(id)
 }

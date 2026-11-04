@@ -49,6 +49,11 @@ class HostEnvironmentViewModel(
     var remoteWorkingDirectory by mutableStateOf("")
     var remoteShell by mutableStateOf(RemoteShell.POSIX)
     var localDirectoryUri by mutableStateOf<String?>(null)
+    /** Item F-02: the shell-export fallback opt-in. */
+    var envExportFallback by mutableStateOf(false)
+    /** Item T-03: the session-transcript opt-ins. */
+    var sessionLogEnabled by mutableStateOf(false)
+    var sessionLogInBackup by mutableStateOf(false)
 
     var settingsErrors by mutableStateOf<Map<String, String>>(emptyMap())
     var settingsSaved by mutableStateOf(false)
@@ -69,6 +74,9 @@ class HostEnvironmentViewModel(
                     remoteWorkingDirectory = stored.remoteWorkingDirectory
                     remoteShell = stored.remoteShell
                     localDirectoryUri = stored.localDirectoryUri
+                    envExportFallback = stored.envExportFallback
+                    sessionLogEnabled = stored.sessionLogEnabled
+                    sessionLogInBackup = stored.sessionLogInBackup
                     settingsLoaded = true
                 }
             }
@@ -86,7 +94,10 @@ class HostEnvironmentViewModel(
             remoteWorkingDirectory = remoteWorkingDirectory.trim(),
             localDirectoryUri = localDirectoryUri,
             remoteShell = remoteShell,
-            shellConfirmed = true
+            shellConfirmed = true,
+            envExportFallback = envExportFallback,
+            sessionLogEnabled = sessionLogEnabled,
+            sessionLogInBackup = sessionLogInBackup
         )
         val issues = mutableListOf<String>()
         val errors = mutableMapOf<String, String>()

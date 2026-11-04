@@ -98,9 +98,16 @@ class TerminalSession(
      * only. If startShell itself fails, no env result is reported
      * (the connection has failed anyway).
      *
-     * There is deliberately NO fallback that injects `export`
-     * text into the shell: that would pollute history, break on
-     * non-POSIX shells, and hide the fact that the server refused.
+     * This layer deliberately has NO fallback that injects
+     * `export` text into the shell. Item F-02 later added one
+     * anyway — but one layer up, in SessionViewModel, and only
+     * behind a per-host opt-in toggle plus the shell
+     * confirmation: the typed lines are visible on screen, the
+     * session status names them as fallback-applied, and the
+     * rendering refuses anything that cannot be typed safely
+     * (see domain/ExportCommand). The refusal itself is never
+     * hidden: names the fallback cannot cover stay in
+     * [EnvApplyResult.rejectedNames].
      */
     suspend fun start(
         envVars: List<Pair<String, String>> = emptyList(),
@@ -181,6 +188,17 @@ class TerminalSession(
             closeNotified = true
         }
         onClosed?.invoke(error)
+    }
+
+    /** Local display clear (item T-19): nothing is sent to the
+     *  remote shell; the parser's screen (and, on the main
+     *  screen, its scrollback) is blanked and republished. */
+    fun clearLocal() {
+        val next = synchronized(parserLock) {
+            parser.clearScreenAndScrollback()
+            parser.snapshot()
+        }
+        _snapshot.value = next
     }
 
     fun sendBytes(bytes: ByteArray) {

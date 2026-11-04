@@ -13,12 +13,14 @@ import com.pishi.termbridge.domain.ExportProxy
 import com.pishi.termbridge.domain.ExportSettings
 import com.pishi.termbridge.domain.ExportTunnel
 import com.pishi.termbridge.domain.ExportVariable
+import com.pishi.termbridge.domain.ExportKeychainEntry
 import com.pishi.termbridge.domain.HostEnvironmentSettings
 import com.pishi.termbridge.domain.HostProfile
 import com.pishi.termbridge.domain.ImportConflict
 import com.pishi.termbridge.domain.ImportPreview
 import com.pishi.termbridge.domain.ImportResult
 import com.pishi.termbridge.domain.JumpChain
+import com.pishi.termbridge.domain.KeychainEntry
 import com.pishi.termbridge.domain.ProxyConfig
 import com.pishi.termbridge.domain.SecretRedactor
 import com.pishi.termbridge.domain.TunnelConfig
@@ -85,7 +87,20 @@ class BackupService(
     // failed child is a warning, not a half-replaced host.
     private val transactionRunner: TransactionRunner = object : TransactionRunner {
         override suspend fun <T> run(block: suspend () -> T): T = block()
-    }
+    },
+    // Item T-01: optional so existing callers/tests keep
+    // working; production passes the real repository (see
+    // TermBridgeApplication). Without it, no keychain section
+    // is exported and a linked host's material is inlined as
+    // its own credential instead — still a complete backup.
+    private val keychainRepository: KeychainRepository? = null,
+    // Item T-02: same pattern for the global snippets. Without
+    // it, no snippets section is exported and imported
+    // snippets are reported as warnings instead of saved.
+    private val snippetRepository: SnippetRepository? = null,
+    // Item T-03: same pattern for session transcripts. Without
+    // it, no transcripts are exported or restored.
+    private val transcriptStore: com.pishi.termbridge.settings.TranscriptStorage? = null
 ) {
     suspend fun buildExport(includeSecrets: Boolean, passphrase: CharArray?): String {
         val hosts = hostRepository.getHosts().first()
@@ -95,18 +110,93 @@ class BackupService(
         // exported, so every hop resolves — mapNotNull below is
         // defensive only, never the normal path.
         val exportIdByHostId = hosts.mapIndexed { index, host -> host.id to index }.toMap()
+        // Item T-01: keychain entries are collected first so a
+        // linked host can reference its entry by label and its
+        // material rides in the keychain section only.
+        val keychainEntries = keychainRepository?.observeEntries()?.first()
+            ?: emptyList()
+        val labelByEntryId = keychainEntries.associate { it.id to it.label }
         val exportHosts = hosts.mapIndexed { index, host ->
-            buildExportHost(host, index, includeSecrets, exportIdByHostId)
+            buildExportHost(host, index, includeSecrets, exportIdByHostId, labelByEntryId)
         }
-        val document = com.pishi.termbridge.domain.BackupDocument(exportHosts)
+        val exportKeychain = keychainEntries.map { entry ->
+            buildExportKeychainEntry(entry, includeSecrets)
+        }
+        // Item T-02: global snippets ride in their own section;
+        // they carry no secrets (the validator forbids them),
+        // so they are exported in both modes.
+        val exportSnippets = snippetRepository?.getSnippetsOnce()
+            ?.map { it.toExport() } ?: emptyList()
+        // Item T-03: transcripts ride ONLY in secret-carrying
+        // (encrypted) exports and ONLY for hosts that opted in
+        // twice. A plain export never contains one — the codec
+        // rejects it on decode as well.
+        val exportTranscripts = if (includeSecrets && transcriptStore != null) {
+            hosts.mapNotNull { host ->
+                val s = environmentRepository.getSettingsOnce(host.id)
+                if (s?.sessionLogEnabled == true && s.sessionLogInBackup) {
+                    val text = transcriptStore.read(host.id)
+                    if (text.isNotEmpty()) {
+                        com.pishi.termbridge.domain.ExportTranscript(host.name, text)
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+            }
+        } else {
+            emptyList()
+        }
+        val document = com.pishi.termbridge.domain.BackupDocument(
+            exportHosts, exportKeychain, exportSnippets, exportTranscripts
+        )
         return BackupCodec.encodeEnvelope(document, includeSecrets, passphrase)
+    }
+
+    private suspend fun buildExportKeychainEntry(
+        entry: KeychainEntry,
+        includeSecrets: Boolean
+    ): ExportKeychainEntry {
+        val material: ExportCredential? = if (includeSecrets) {
+            val bytes = try {
+                keychainRepository!!.loadMaterial(entry.id)
+            } catch (e: KeychainRepositoryException) {
+                // Like an undecryptable env var: fail the whole
+                // export rather than silently dropping an entry
+                // the user believes is backed up.
+                throw BackupException(
+                    "Keychain entry \"${entry.label}\" could not be decrypted; " +
+                        "the export was not written."
+                )
+            } ?: throw BackupException(
+                "Keychain entry \"${entry.label}\" could not be decrypted; " +
+                    "the export was not written."
+            )
+            try {
+                ExportCredential(entry.kind, String(bytes, Charsets.UTF_8))
+            } finally {
+                bytes.wipe()
+            }
+        } else {
+            null
+        }
+        return ExportKeychainEntry(
+            label = entry.label,
+            kind = entry.kind,
+            material = material,
+            hasMaterial = true,
+            publicKeyText = entry.publicKeyText,
+            fingerprint = entry.fingerprint
+        )
     }
 
     private suspend fun buildExportHost(
         host: HostProfile,
         exportId: Int,
         includeSecrets: Boolean,
-        exportIdByHostId: Map<Long, Int>
+        exportIdByHostId: Map<Long, Int>,
+        labelByEntryId: Map<Long, String> = emptyMap()
     ): ExportHost {
         val buttons = commandRepository.getButtons(host.id).first().mapNotNull { summary ->
             commandRepository.getButton(summary.id)
@@ -136,7 +226,12 @@ class BackupService(
         } else {
             emptyList()
         }
-        val credential: ExportCredential? = if (includeSecrets) {
+        // Item T-01: a host linked to a keychain entry exports
+        // the LABEL only — its material rides in the keychain
+        // section, never duplicated here. An unlinked host (or
+        // a dangling reference) keeps the inline path.
+        val keychainLabel = host.keychainEntryId?.let { labelByEntryId[it] }
+        val credential: ExportCredential? = if (includeSecrets && keychainLabel == null) {
             val bytes = hostRepository.loadCredential(host.id)
             if (bytes == null) {
                 null
@@ -175,7 +270,10 @@ class BackupService(
             envVars = envVars,
             tunnels = tunnels,
             proxy = proxy,
-            jumpHopExportIds = hopExportIds
+            jumpHopExportIds = hopExportIds,
+            keychainLabel = keychainLabel,
+            favorite = host.favorite,
+            groupName = host.groupName
         )
     }
 
@@ -218,6 +316,11 @@ class BackupService(
      */
     private fun securityWarnings(document: BackupDocument): List<String> {
         val out = mutableListOf<String>()
+        if (document.keychain.isNotEmpty()) {
+            out += "This backup contains ${document.keychain.size} keychain " +
+                "entries — hosts linked to them resolve their credential " +
+                "through the entry after import."
+        }
         for (host in document.hosts) {
             val exposed = host.tunnels.count { it.allowNonLoopback }
             if (exposed > 0) {
@@ -246,6 +349,65 @@ class BackupService(
         val replacedNames = mutableListOf<String>()
         val skippedNames = mutableListOf<String>()
         val warnings = preview.warnings.toMutableList()
+        // Pass 0 (item T-01): keychain entries, before any host
+        // that links to them. An entry whose material is not in
+        // the file (non-secret export) is NOT recreated — an
+        // empty entry would look usable and fail at connect —
+        // and hosts linking to it import unlinked, with a
+        // warning each. A label that is already taken is
+        // imported under a suffixed label rather than
+        // overwriting the existing entry.
+        val keychainIdByLabel = mutableMapOf<String, Long>()
+        for (entry in preview.document.keychain) {
+            if (entry.material == null) {
+                if (entry.hasMaterial) {
+                    warnings +=
+                        "Keychain entry \"${entry.label}\" was not restored: " +
+                            "its secret is not in this backup file."
+                }
+                continue
+            }
+            val repo = keychainRepository
+            if (repo == null) {
+                warnings +=
+                    "Keychain entry \"${entry.label}\" could not be imported."
+                continue
+            }
+            var candidate = entry.label
+            var attempt = 1
+            while (repo.getByLabel(candidate) != null) {
+                attempt++
+                candidate = if (attempt == 2) {
+                    "${entry.label} (imported)"
+                } else {
+                    "${entry.label} (imported ${attempt - 1})"
+                }
+            }
+            if (candidate != entry.label) {
+                warnings +=
+                    "Keychain entry \"${entry.label}\" was imported as " +
+                        "\"$candidate\" because the label is already in use."
+            }
+            val input = when (entry.material.kind) {
+                AuthType.PASSWORD ->
+                    CredentialInput.Password(entry.material.value.toCharArray())
+                AuthType.PRIVATE_KEY ->
+                    CredentialInput.PrivateKey(entry.material.value, null)
+            }
+            try {
+                val saved = repo.saveEntry(
+                    KeychainEntry(label = candidate, kind = entry.kind),
+                    input,
+                    publicKeyText = entry.publicKeyText,
+                    fingerprint = entry.fingerprint
+                )
+                keychainIdByLabel[entry.label] = saved.id
+            } catch (e: Exception) {
+                warnings +=
+                    "Keychain entry \"${entry.label}\" could not be imported: " +
+                        safeMessage(e)
+            }
+        }
         // Pass 1: hosts + children except jump chains. newIdByExportId
         // is the remap table for pass 2.
         val newIdByExportId = mutableMapOf<Int, Long>()
@@ -263,7 +425,7 @@ class BackupService(
             } else {
                 0L
             }
-            val credentialInput: CredentialInput? = when (exported.credential) {
+            val rawCredentialInput: CredentialInput? = when (exported.credential) {
                 null -> null
                 else -> when (exported.credential.kind) {
                     AuthType.PASSWORD ->
@@ -271,6 +433,44 @@ class BackupService(
                     AuthType.PRIVATE_KEY ->
                         CredentialInput.PrivateKey(exported.credential.value, null)
                 }
+            }
+            // Item T-01 link resolution. A restored entry wins
+            // over an inline credential (our own exports never
+            // carry both; a crafted file might). When the file
+            // carries no secret for this host at all — no inline
+            // credential and no restored entry — a REPLACE keeps
+            // the existing credential state whole (link
+            // included), exactly like a non-secret replace keeps
+            // an inline credential: a file with no secret in
+            // hand has nothing to replace a secret with. A FRESH
+            // host in that state cannot be created (a credential
+            // is required for a new host) and is reported below
+            // by the save failure, like any credential-less host
+            // from a non-secret backup.
+            val linkedEntryId = exported.keychainLabel?.let { keychainIdByLabel[it] }
+            if (linkedEntryId != null && rawCredentialInput != null) {
+                warnings +=
+                    "Host \"${exported.name}\" carried both a credential and a " +
+                        "keychain link; the keychain link was used."
+            }
+            if (exported.keychainLabel != null && linkedEntryId == null &&
+                rawCredentialInput == null
+            ) {
+                warnings += if (existingMatch != null) {
+                    "Host \"${exported.name}\" kept its existing credential " +
+                        "because its keychain entry was not restored from " +
+                        "this backup."
+                } else {
+                    "Host \"${exported.name}\" has no credential in this " +
+                        "backup: its keychain entry was not restored."
+                }
+            }
+            val credentialInput = if (linkedEntryId != null) null else rawCredentialInput
+            val profileKeychainId = when {
+                linkedEntryId != null -> linkedEntryId
+                existingMatch != null && credentialInput == null ->
+                    existingMatch.keychainEntryId
+                else -> null
             }
             val profile = HostProfile(
                 id = targetId,
@@ -280,7 +480,10 @@ class BackupService(
                 username = exported.username,
                 authType = exported.authType,
                 notes = exported.notes,
-                tags = exported.tags
+                tags = exported.tags,
+                keychainEntryId = profileKeychainId,
+                favorite = exported.favorite,
+                groupName = exported.groupName
             )
             if (existingMatch != null) {
                 // Replace (security fix 16, M3): the whole unit —
@@ -341,6 +544,61 @@ class BackupService(
                     "Jump chain for host \"${exported.name}\" could not be saved: " +
                         safeMessage(e)
             }
+        }
+        // Pass 3 (item T-02): global snippets. Additive only —
+        // importing never deletes or replaces local snippets,
+        // and a snippet that fails validation is a warning,
+        // like a failed child on a fresh host import.
+        for (snippet in preview.document.snippets) {
+            val repo = snippetRepository
+            if (repo == null) {
+                warnings +=
+                    "Snippet \"${snippet.label}\" could not be imported."
+                continue
+            }
+            try {
+                repo.saveSnippet(snippet.toDomain(GLOBAL_HOST_ID))
+            } catch (e: Exception) {
+                warnings +=
+                    "Snippet \"${snippet.label}\" could not be imported: " +
+                        safeMessage(e)
+            }
+        }
+        // Pass 4 (item T-03): session transcripts. Matched to
+        // imported hosts by display name (the export key);
+        // restoring one re-enables that host's two opt-ins, so
+        // the restored device keeps recording into the file.
+        val store = transcriptStore
+        if (store != null) {
+            for (transcript in preview.document.transcripts) {
+                val exported = preview.document.hosts
+                    .firstOrNull { it.name == transcript.hostLabel }
+                val newId = exported?.let { newIdByExportId[it.exportId] }
+                if (newId == null) {
+                    warnings +=
+                        "Transcript for \"${transcript.hostLabel}\" was not " +
+                            "restored: the host was not imported."
+                    continue
+                }
+                try {
+                    store.write(newId, transcript.text)
+                    val existing = environmentRepository.getSettingsOnce(newId)
+                    environmentRepository.saveSettings(
+                        (existing ?: com.pishi.termbridge.domain.HostEnvironmentSettings(
+                            hostId = newId
+                        )).copy(
+                            sessionLogEnabled = true,
+                            sessionLogInBackup = true
+                        )
+                    )
+                } catch (e: Exception) {
+                    warnings +=
+                        "Transcript for \"${transcript.hostLabel}\" could not " +
+                            "be restored: ${safeMessage(e)}"
+                }
+            }
+        } else if (preview.document.transcripts.isNotEmpty()) {
+            warnings += "Session transcripts were not restored (no transcript store)."
         }
         return ImportResult(
             importedNames = importedNames,

@@ -128,6 +128,34 @@ fun CommandsScreen(
         }
         Text(text = stringResource(R.string.commands_select_host))
         Spacer(modifier = Modifier.height(Spacing.small))
+        // Global snippets (item T-02): a pseudo-entry above the
+        // hosts; its buttons are offered in every session.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = Spacing.minTouch)
+                .clickable {
+                    viewModel.selectHost(com.pishi.termbridge.data.GLOBAL_HOST_ID)
+                },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = selectedHostId == com.pishi.termbridge.data.GLOBAL_HOST_ID,
+                onClick = {
+                    viewModel.selectHost(com.pishi.termbridge.data.GLOBAL_HOST_ID)
+                }
+            )
+            Column {
+                Text(
+                    text = stringResource(R.string.commands_global_title),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = stringResource(R.string.commands_global_sub),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
         hosts.forEach { host ->
             // Prompt 14: whole-row selection, 48dp minimum.
             Row(

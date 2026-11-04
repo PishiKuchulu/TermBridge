@@ -8,17 +8,20 @@ command buttons, per-host environment settings, SSH tunnels
 import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
-**Status: remediation in progress, NOT a release.** Version
+**Status: in active development, NOT a release.** Version
 `0.1.0-foundation` (versionCode 1), database v5. CI went
 green for the first time on 2026-10-25 (run #13: unit tests
-+ debug assemble + emulator instrumented tests), and a
-9-phase security remediation is underway (see
-`docs/REMEDIATION_REPORT.md`) — but signing, device runs,
-and tier-2 integration tests are still open, so this is
-still not a release. See `docs/RELEASE_NOTES.md` for the
-release gates. Nothing in this file claims otherwise.
++ debug assemble + emulator instrumented tests). Since then:
+the 9-phase security remediation and the review-2 fix wave
+landed (see `docs/REVIEW_2_REMEDIATION.md`), and four
+Termius-parity phases added settings/themes, Vault
+navigation, an app lock and a VNC screen (see
+`docs/PARITY_PHASES.md`) — but signing, device runs, and
+tier-2 integration tests are still open, so this is still
+not a release. See `docs/RELEASE_NOTES.md` for the release
+gates. Nothing in this file claims otherwise.
 
-## What works (evidence labels in docs/REMEDIATION_REPORT.md)
+## What works (evidence labels in docs/PARITY_PHASES.md and the phase reports)
 
 - Hosts + credentials: Room profiles, Android Keystore
   AES-256-GCM, host-key fingerprint verification
@@ -57,6 +60,13 @@ release gates. Nothing in this file claims otherwise.
   backup uses PBKDF2 (600k) + AES-256-GCM. Trusted host
   keys are never exported; import never trusts a key or
   executes a command.
+- App shell (parity phases 1–4): persisted settings
+  (font size, scrollback, TERM type, keep-alive, colour
+  schemes), Vault / Connections / Settings navigation,
+  known-hosts management, local connection-history log,
+  subnet discovery, quick-connect form pre-fill, and an
+  optional app lock (salted PBKDF2 PIN with throttling,
+  optional biometric unlock).
 
 ## What is blocked (honest, by design)
 
@@ -64,12 +74,15 @@ release gates. Nothing in this file claims otherwise.
   no CI build, no Windows endpoint here). No RDP code,
   no connect button. Candidate: FreeRDP 3.x, built from
   source when unblocked.
-- **VNC session**: blocked by the prompt-13 proof gate
-  (no controlled Linux VNC server here). A pure-Kotlin
-  RFB protocol core IS in the tree (versions 3.3/3.7/3.8,
-  No Auth + VNC Auth, Raw/CopyRect/RRE/CoRRE/Hextile)
-  but is deliberately unwired — no session UI, no
-  connect button — until a real-server proof exists.
+- **VNC session**: the pure-Kotlin RFB protocol core
+  (versions 3.3/3.7/3.8, No Auth + VNC Auth,
+  Raw/CopyRect/RRE/CoRRE/Hextile) is wired to a remote
+  desktop screen since parity phase 4 (touch-as-mouse,
+  key row, Unicode typing). It is NOT yet proven against
+  a real VNC server: `RfbIntegrationTest` exists but is
+  skipped in CI, so treat VNC as unverified until that
+  proof lands (item F-03a in
+  `docs/PARITY_TRACEABILITY.md`).
 
 ## Build
 
@@ -84,11 +97,13 @@ JDK 17, compile/target SDK 35, minSdk 26. The committed
 ```
 
 CI (`.github/workflows/android-ci.yml`): unit-test +
-debug-assemble job, plus an emulator instrumented-test
-job. First green run: #13 on 2026-10-25 (commit
-0ce9772). The instrumented job provisions the SSH
-fixture before the emulator run (remediation phase 7);
-without a fixture the fixture tests skip via Assume.
+debug-assemble job (on main it also publishes the debug
+APK to the rolling `debug-latest` release), plus an
+emulator instrumented-test job. First green run: #13 on
+2026-10-25 (commit 0ce9772). The instrumented job
+provisions the SSH fixture before the emulator run
+(remediation phase 7); without a fixture the fixture
+tests skip via Assume.
 
 ## Server prerequisites
 
@@ -97,12 +112,13 @@ without a fixture the fixture tests skip via Assume.
   has one enabled). SFTP needs a compatible SFTP
   subsystem on the server. Most servers accept only
   LANG/LC_* environment variables by default.
-- RDP/VNC: see "blocked" above; no endpoint is
-  supported until the proof gates pass.
+- RDP: not supported (see "blocked" above). VNC: the
+  client screen exists but is unverified against a real
+  server (see "blocked" above).
 
 ## Permissions, privacy, security
 
-- Permissions: INTERNET + ACCESS_NETWORK_STATE, plus USE_BIOMETRIC contributed by the AndroidX biometric library for the optional app lock (to be re-verified from the merged manifest).
+- Permissions: INTERNET + ACCESS_NETWORK_STATE in the app manifest, plus USE_BIOMETRIC and USE_FINGERPRINT contributed to the merged manifest by the AndroidX biometric library for the optional app lock (verified against the biometric 1.1.0 library manifest, 2026-11-04).
   `allowBackup=false` (export is the migration path);
   cleartext traffic forbidden; one exported activity
   (the launcher); FLAG_SECURE on the app window.
@@ -111,20 +127,20 @@ without a fixture the fixture tests skip via Assume.
 - Audits: `docs/SECURITY_AUDIT.md` (prompt 16, 13
   findings) + `docs/SECURITY_FIXES_16.md` (fix pass) +
   `docs/CAPABILITY_CLAIM_AUDIT.md` (prompt 17, 23 rows) +
-  `docs/REMEDIATION_REPORT.md` (2026-10-25, 9 phases) with
-  `docs/TEST_EVIDENCE.md`, `docs/SECURITY_STATUS.md`, and
-  `docs/RELEASE_READINESS.md`.
+  `docs/REVIEW_2_REMEDIATION.md` (review-2 fix wave).
   Residual gates: full dependency-tree scan (OSV spot
   queries done — 4 Bouncy Castle advisories assessed,
-  see the remediation report), fixture tier-2 tests,
-  device runs, release signing.
+  see `docs/REVIEW_2_REMEDIATION.md`), fixture tier-2
+  tests, device runs, release signing. Remaining-work
+  tracking: `docs/PARITY_TRACEABILITY.md`.
 
 ## Licences (shipped runtime dependencies, all Apache 2.0)
 
 Jetpack Compose (BOM 2024.09.00), Navigation Compose
 2.8.0, Kotlin Coroutines 1.8.1, Room 2.6.1, sshj 0.40.0,
 kotlinx-serialization-json 1.7.3, Material Icons Extended
-(Compose BOM 2024.09.00), AndroidX core/lifecycle/activity.
+(Compose BOM 2024.09.00), AndroidX core/lifecycle/activity,
+AndroidX Biometric 1.1.0.
 Test-only dependencies (JUnit, Espresso, Compose UI test)
 are not shipped. The About screen lists the same set.
 

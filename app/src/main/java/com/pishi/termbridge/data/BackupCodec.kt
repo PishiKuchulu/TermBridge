@@ -13,6 +13,7 @@ import com.pishi.termbridge.domain.ExportButton
 import com.pishi.termbridge.domain.ExportCredential
 import com.pishi.termbridge.domain.ExportEnvVar
 import com.pishi.termbridge.domain.ExportHost
+import com.pishi.termbridge.domain.ExportKeychainEntry
 import com.pishi.termbridge.domain.ExportProxy
 import com.pishi.termbridge.domain.ExportSettings
 import com.pishi.termbridge.domain.ExportTunnel
@@ -20,7 +21,10 @@ import com.pishi.termbridge.domain.ExportVariable
 import com.pishi.termbridge.domain.HostProfile
 import com.pishi.termbridge.domain.HostValidator
 import com.pishi.termbridge.domain.JumpChainValidator
+import com.pishi.termbridge.domain.KeychainValidator
 import com.pishi.termbridge.domain.MAX_BUTTONS_PER_HOST
+import com.pishi.termbridge.domain.MAX_KEYCHAIN_ENTRIES_IN_BACKUP
+import com.pishi.termbridge.domain.MAX_SNIPPETS_IN_BACKUP
 import com.pishi.termbridge.domain.MAX_ENV_VARS_PER_HOST
 import com.pishi.termbridge.domain.MAX_HOSTS_IN_BACKUP
 import com.pishi.termbridge.domain.MAX_TUNNELS_PER_HOST
@@ -91,7 +95,19 @@ data class ParsedBackup(
  *   "tunnels":[{kind,bindAddress,bindPort,targetHost,targetPort,
  *     allowNonLoopback,enabled,label}],
  *   "proxy":null|{kind,proxyHost,proxyPort},
- *   "jumpHopExportIds":[1,2] }]}
+ *   "jumpHopExportIds":[1,2],
+ *   "keychainLabel":null|"Prod key",
+ *   "favorite":false,"groupName":"" }],
+ *  "keychain":[{ "label":...,"kind":"PRIVATE_KEY",
+ *   "material":null|{"kind":"PRIVATE_KEY","value":...},
+ *   "hasMaterial":true,"publicKeyText":...,"fingerprint":... }]}
+ * The "keychain" section and the per-host "keychainLabel" are
+ * item T-01 additions: both are optional on decode so backups
+ * written before the keychain existed still open; keychain
+ * material obeys the same encrypted-only rule as credentials.
+ * The "snippets" section (item T-02) carries the global
+ * snippets in the same shape as a host's "buttons" array and
+ * is likewise optional on decode.
  *
  * Fail-closed rules, all enforced here (never in the UI):
  * - Wrong format string, wrong version, malformed JSON, wrong
@@ -118,9 +134,20 @@ object BackupCodec {
     private val hostKeys = setOf(
         "exportId", "name", "hostname", "port", "username", "authType",
         "notes", "tags", "credential", "hasCredential", "buttons",
-        "settings", "envVars", "tunnels", "proxy", "jumpHopExportIds"
+        "settings", "envVars", "tunnels", "proxy", "jumpHopExportIds",
+        // Optional: backups written before the keychain existed
+        // do not carry it (allowed, never required).
+        "keychainLabel",
+        // Optional: item T-22 organization fields, same rule.
+        "favorite", "groupName"
     )
+    /** hostKeys minus the fields added after v1 files exist:
+     *  allowed on decode, never required. */
+    private val hostRequiredKeys = hostKeys - "keychainLabel" - "favorite" - "groupName"
     private val credentialKeys = setOf("kind", "value")
+    private val keychainEntryKeys = setOf(
+        "label", "kind", "material", "hasMaterial", "publicKeyText", "fingerprint"
+    )
     private val buttonKeys =
         setOf("label", "category", "sortOrder", "mode", "template", "steps", "variables")
     private val variableKeys = setOf("name", "defaultValue", "required")
@@ -229,7 +256,8 @@ object BackupCodec {
         return ParsedBackup(
             document = document,
             encrypted = encrypted,
-            hasCredentials = document.hosts.any { it.credential != null },
+            hasCredentials = document.hosts.any { it.credential != null } ||
+                document.keychain.any { it.material != null },
             warnings = warnings
         )
     }
@@ -322,6 +350,75 @@ object BackupCodec {
                     put("jumpHopExportIds", buildJsonArray {
                         for (hop in host.jumpHopExportIds) add(JsonPrimitive(hop))
                     })
+                    if (host.keychainLabel != null) {
+                        put("keychainLabel", JsonPrimitive(host.keychainLabel))
+                    } else {
+                        put("keychainLabel", JsonNull)
+                    }
+                    put("favorite", JsonPrimitive(host.favorite))
+                    put("groupName", JsonPrimitive(host.groupName))
+                })
+            }
+        })
+        put("keychain", buildJsonArray {
+            for (entry in document.keychain) {
+                add(buildJsonObject {
+                    put("label", JsonPrimitive(entry.label))
+                    put("kind", JsonPrimitive(entry.kind.name))
+                    if (entry.material != null) {
+                        put("material", buildJsonObject {
+                            put("kind", JsonPrimitive(entry.material.kind.name))
+                            put("value", JsonPrimitive(entry.material.value))
+                        })
+                    } else {
+                        put("material", JsonNull)
+                    }
+                    put("hasMaterial", JsonPrimitive(entry.hasMaterial))
+                    if (entry.publicKeyText != null) {
+                        put("publicKeyText", JsonPrimitive(entry.publicKeyText))
+                    } else {
+                        put("publicKeyText", JsonNull)
+                    }
+                    if (entry.fingerprint != null) {
+                        put("fingerprint", JsonPrimitive(entry.fingerprint))
+                    } else {
+                        put("fingerprint", JsonNull)
+                    }
+                })
+            }
+        })
+        put("snippets", buildJsonArray {
+            for (button in document.snippets) {
+                add(buildJsonObject {
+                    put("label", JsonPrimitive(button.label))
+                    put("category", JsonPrimitive(button.category))
+                    put("sortOrder", JsonPrimitive(button.sortOrder))
+                    put("mode", JsonPrimitive(button.mode.name))
+                    put("template", JsonPrimitive(button.template))
+                    put("steps", buildJsonArray {
+                        for (step in button.steps) add(JsonPrimitive(step))
+                    })
+                    put("variables", buildJsonArray {
+                        for (variable in button.variables) {
+                            add(buildJsonObject {
+                                put("name", JsonPrimitive(variable.name))
+                                put("defaultValue", JsonPrimitive(variable.defaultValue))
+                                put("required", JsonPrimitive(variable.required))
+                            })
+                        }
+                    })
+                })
+            }
+        })
+        // Item T-03: transcripts (encrypted files, opted-in
+        // hosts only — enforced by BackupService on export and
+        // re-checked here: a transcript in a PLAIN file is
+        // rejected like keychain material is).
+        put("transcripts", buildJsonArray {
+            for (transcript in document.transcripts) {
+                add(buildJsonObject {
+                    put("hostLabel", JsonPrimitive(transcript.hostLabel))
+                    put("text", JsonPrimitive(transcript.text))
                 })
             }
         })
@@ -339,7 +436,10 @@ object BackupCodec {
         } catch (e: Exception) {
             throw BackupException("Backup payload is not valid JSON.")
         }
-        checkKeys(root, setOf("hosts"), setOf("hosts"), "payload")
+        // "keychain" and "snippets" are allowed but never
+        // required: backups written before items T-01/T-02 do
+        // not carry those sections.
+        checkKeys(root, setOf("hosts", "keychain", "snippets", "transcripts"), setOf("hosts"), "payload")
         val hostArray = try {
             root["hosts"]?.jsonArray
         } catch (e: Exception) {
@@ -351,6 +451,9 @@ object BackupCodec {
         val hosts = hostArray.mapIndexed { index, element ->
             decodeHost(element, "host #$index", encrypted)
         }
+        val keychain = decodeKeychain(root, encrypted)
+        val snippets = decodeSnippets(root)
+        val transcripts = decodeTranscripts(root, encrypted)
         val exportIds = hosts.map { it.exportId }
         if (exportIds.size != exportIds.toSet().size) {
             throw BackupException("Backup host ids must be unique.")
@@ -390,7 +493,159 @@ object BackupCodec {
                 }
             }
         }
-        return BackupDocument(resolved) to warnings
+        // Resolve keychain links with the same forgiveness as
+        // jump chains: a link to an entry that is not in this
+        // backup — or whose kind does not match the host — is
+        // dropped with a warning, never silently kept (a kept
+        // link would fail the host's save at import) and never
+        // a reason to reject the whole file.
+        val entriesByLabel = keychain.associateBy { it.label }
+        val linked = resolved.map { host ->
+            val label = host.keychainLabel ?: return@map host
+            val entry = entriesByLabel[label]
+            when {
+                entry == null -> {
+                    warnings +=
+                        "Keychain link for host \"${host.name}\" was skipped: " +
+                            "entry \"$label\" is not in this backup."
+                    host.copy(keychainLabel = null)
+                }
+                entry.kind != host.authType -> {
+                    warnings +=
+                        "Keychain link for host \"${host.name}\" was skipped: " +
+                            "entry \"$label\" does not match the host's authentication type."
+                    host.copy(keychainLabel = null)
+                }
+                else -> host
+            }
+        }
+        return BackupDocument(linked, keychain, snippets, transcripts) to warnings
+    }
+
+    /** Item T-03: the transcripts section. Present only in
+     *  encrypted files — a transcript in a plain file fails the
+     *  whole decode, the same rule as keychain material. */
+    private fun decodeTranscripts(
+        root: JsonObject,
+        encrypted: Boolean
+    ): List<com.pishi.termbridge.domain.ExportTranscript> {
+        val element = root["transcripts"] ?: return emptyList()
+        val array = try {
+            element.jsonArray
+        } catch (e: Exception) {
+            throw BackupException("Backup transcripts section is malformed.")
+        }
+        if (array.size > com.pishi.termbridge.domain.MAX_TRANSCRIPTS_IN_BACKUP) {
+            throw BackupException("Backup contains too many transcripts.")
+        }
+        if (array.isNotEmpty() && !encrypted) {
+            throw BackupException(
+                "Session transcripts must not appear in an unencrypted backup."
+            )
+        }
+        return array.map { item ->
+            val obj = try {
+                item.jsonObject
+            } catch (e: Exception) {
+                throw BackupException("Backup transcript entry is malformed.")
+            }
+            val label = obj["hostLabel"]?.jsonPrimitive?.content
+                ?: throw BackupException("Backup transcript is missing its host label.")
+            val text = obj["text"]?.jsonPrimitive?.content
+                ?: throw BackupException("Backup transcript is missing its text.")
+            if (label.isBlank()) {
+                throw BackupException("Backup transcript has a blank host label.")
+            }
+            if (text.length > com.pishi.termbridge.domain.MAX_TRANSCRIPT_CHARS) {
+                throw BackupException("Backup transcript is too large.")
+            }
+            com.pishi.termbridge.domain.ExportTranscript(label, text)
+        }
+    }
+
+    private fun decodeKeychain(root: JsonObject, encrypted: Boolean): List<ExportKeychainEntry> {
+        val element = root["keychain"] ?: return emptyList()
+        val array = try {
+            element.jsonArray
+        } catch (e: Exception) {
+            throw BackupException("Invalid keychain section in payload.")
+        }
+        if (array.size > MAX_KEYCHAIN_ENTRIES_IN_BACKUP) {
+            throw BackupException("Backup contains too many keychain entries.")
+        }
+        val entries = array.mapIndexed { index, entryElement ->
+            val where = "keychain entry #$index"
+            val obj = try {
+                entryElement.jsonObject
+            } catch (e: Exception) {
+                throw BackupException("Invalid $where.")
+            }
+            checkKeys(obj, keychainEntryKeys, keychainEntryKeys, where)
+            val label = obj.reqString("label", where)
+            val labelIssues = KeychainValidator.validateLabel(label)
+            if (labelIssues.isNotEmpty()) {
+                throw BackupException("Invalid label in $where: ${labelIssues.first().message}")
+            }
+            val kind = try {
+                AuthType.valueOf(obj.reqString("kind", where))
+            } catch (e: Exception) {
+                throw BackupException("Invalid keychain entry type in $where.")
+            }
+            val hasMaterial = obj.reqBoolean("hasMaterial", where)
+            val materialElement = obj["material"]
+            val material: ExportCredential? = when {
+                materialElement == null || materialElement is JsonNull -> null
+                else -> {
+                    val materialObj = try {
+                        materialElement.jsonObject
+                    } catch (e: Exception) {
+                        throw BackupException("Invalid keychain material in $where.")
+                    }
+                    checkKeys(materialObj, credentialKeys, credentialKeys, "$where material")
+                    val materialKind = try {
+                        AuthType.valueOf(materialObj.reqString("kind", "$where material"))
+                    } catch (e: Exception) {
+                        throw BackupException("Invalid keychain material type in $where.")
+                    }
+                    if (materialKind != kind) {
+                        throw BackupException(
+                            "Keychain material type does not match entry type in $where."
+                        )
+                    }
+                    ExportCredential(
+                        materialKind,
+                        materialObj.reqString("value", "$where material")
+                    )
+                }
+            }
+            if (!encrypted && material != null) {
+                throw BackupException(
+                    "A non-encrypted backup must not contain keychain material."
+                )
+            }
+            if (material != null) {
+                val input = when (material.kind) {
+                    AuthType.PASSWORD -> CredentialInput.Password(material.value.toCharArray())
+                    AuthType.PRIVATE_KEY -> CredentialInput.PrivateKey(material.value, null)
+                }
+                val issues = HostValidator.validateCredential(kind, input, false)
+                if (issues.isNotEmpty()) {
+                    throw BackupException("Invalid keychain material in $where.")
+                }
+            }
+            ExportKeychainEntry(
+                label = label,
+                kind = kind,
+                material = material,
+                hasMaterial = hasMaterial,
+                publicKeyText = obj.optString("publicKeyText", where),
+                fingerprint = obj.optString("fingerprint", where)
+            )
+        }
+        if (entries.size != entries.distinctBy { it.label }.size) {
+            throw BackupException("Backup keychain labels must be unique.")
+        }
+        return entries
     }
 
     private fun decodeHost(element: kotlinx.serialization.json.JsonElement, where: String, encrypted: Boolean): ExportHost {
@@ -399,7 +654,7 @@ object BackupCodec {
         } catch (e: Exception) {
             throw BackupException("Invalid $where.")
         }
-        checkKeys(obj, hostKeys, hostKeys, where)
+        checkKeys(obj, hostKeys, hostRequiredKeys, where)
         val exportId = obj.reqInt("exportId", where)
         val name = obj.reqString("name", where)
         val hostname = obj.reqString("hostname", where)
@@ -484,18 +739,45 @@ object BackupCodec {
             envVars = envVars,
             tunnels = tunnels,
             proxy = proxy,
-            jumpHopExportIds = hops
+            jumpHopExportIds = hops,
+            keychainLabel = obj.optString("keychainLabel", where),
+            favorite = obj.optBoolean("favorite", where),
+            groupName = obj.optString("groupName", where) ?: ""
         )
     }
 
-    private fun decodeButtons(obj: JsonObject, where: String): List<ExportButton> {
+    /**
+     * Item T-02: the global snippets section reuses the button
+     * shape and its full validation (including the secret scan
+     * inside [CommandValidator]) via [decodeButtons]; only the
+     * count cap differs.
+     */
+    private fun decodeSnippets(root: JsonObject): List<ExportButton> {
+        val element = root["snippets"] ?: return emptyList()
+        val array = try {
+            element.jsonArray
+        } catch (e: Exception) {
+            null
+        } ?: throw BackupException("Invalid snippets in payload.")
+        if (array.size > MAX_SNIPPETS_IN_BACKUP) {
+            throw BackupException("Backup contains too many snippets.")
+        }
+        val wrapper = buildJsonObject { put("buttons", array) }
+        return decodeButtons(wrapper, "snippets", MAX_SNIPPETS_IN_BACKUP)
+    }
+
+    private fun decodeButtons(
+        obj: JsonObject,
+        where: String,
+        maxCount: Int = MAX_BUTTONS_PER_HOST
+    ): List<ExportButton> {
         val array = try {
             obj["buttons"]?.jsonArray
         } catch (e: Exception) {
             null
         } ?: throw BackupException("Invalid buttons in $where.")
-        if (array.size > MAX_BUTTONS_PER_HOST) {
-            throw BackupException("A host in $where has too many command buttons.")
+        if (array.size > maxCount) {
+            throw BackupException("Too many command buttons in $where.")
         }
         return array.mapIndexed { index, element ->
             val buttonObj = try {
@@ -711,6 +993,32 @@ object BackupCodec {
         val missing = required - obj.keys
         if (missing.isNotEmpty()) {
             throw BackupException("Missing field in $where: ${missing.first()}.")
+        }
+    }
+
+    /** Optional nullable string: absent and JSON null both map
+     *  to null (fields added after v1 files exist); any other
+     *  non-string type is a hard failure like everywhere else. */
+    private fun JsonObject.optString(key: String, where: String): String? {
+        val element = this[key] ?: return null
+        if (element is JsonNull) return null
+        return try {
+            element.jsonPrimitive.content
+        } catch (e: Exception) {
+            throw BackupException("Field $key in $where has the wrong type.")
+        }
+    }
+
+    /** Optional boolean with the same contract as [optString]:
+     *  absent or JSON null maps to false (fields added after v1
+     *  files exist); any non-boolean type is a hard failure. */
+    private fun JsonObject.optBoolean(key: String, where: String): Boolean {
+        val element = this[key] ?: return false
+        if (element is JsonNull) return false
+        return try {
+            element.jsonPrimitive.content.toBooleanStrict()
+        } catch (e: Exception) {
+            throw BackupException("Field $key in $where has the wrong type.")
         }
     }
 

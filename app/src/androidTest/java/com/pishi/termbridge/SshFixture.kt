@@ -33,6 +33,45 @@ object SshFixture {
     val keyUsername: String get() = args.getString("fixture_key_user", "termbridge-key")
     private val keyB64: String get() = args.getString("fixture_key_b64", "")
 
+    // Item R-10: a second client key, RSA — proves the
+    // rsa-sha2-256/512 signature path against modern OpenSSH
+    // (which refuses SHA-1 ssh-rsa).
+    private val rsaKeyB64: String get() = args.getString("fixture_rsa_key_b64", "")
+
+    /** True only when the RSA client key was supplied. */
+    val isRsaKeyConfigured: Boolean get() = rsaKeyB64.isNotEmpty()
+
+    fun assumeRsaKeyAvailable() {
+        Assume.assumeTrue(
+            "R-10 RSA client key not configured — pass fixture_rsa_key_b64 " +
+                "(see tests/fixture/setup-sshd-fixture.sh)",
+            isRsaKeyConfigured
+        )
+    }
+
+    /** PEM bytes of the per-run RSA client key (caller wipes). */
+    fun rsaKeyCredential(): ByteArray =
+        android.util.Base64.decode(rsaKeyB64, android.util.Base64.DEFAULT)
+
+    // Item T-20 fixture extras (0 = not provisioned by this run,
+    // the forwarding tests then skip with a stated reason).
+    val bastionPort: Int get() = args.getString("fixture_bastion_port", "0").toIntOrNull() ?: 0
+    val echoPort: Int get() = args.getString("fixture_echo_port", "0").toIntOrNull() ?: 0
+    val socksPort: Int get() = args.getString("fixture_socks_port", "0").toIntOrNull() ?: 0
+
+    /** True when the T-20 forwarding fixtures were provisioned. */
+    val isForwardingConfigured: Boolean
+        get() = bastionPort > 0 && echoPort > 0 && socksPort > 0
+
+    fun assumeForwardingAvailable() {
+        Assume.assumeTrue(
+            "T-20 forwarding fixture not configured — pass " +
+                "fixture_bastion_port, fixture_echo_port and " +
+                "fixture_socks_port (see tests/fixture/setup-sshd-fixture.sh)",
+            isForwardingConfigured
+        )
+    }
+
     /** True only when the public-key user's private key was supplied. */
     val isKeyConfigured: Boolean get() = keyB64.isNotEmpty()
 

@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -124,7 +125,84 @@ fun HostFormScreen(
             Text(text = stringResource(R.string.auth_private_key))
         }
         Spacer(modifier = Modifier.height(Spacing.small))
-        if (viewModel.authType == AuthType.PASSWORD) {
+        // Item T-01: credential source. Shown only when the
+        // keychain exists and has an entry of this auth type
+        // (or the host is already linked) — otherwise the form
+        // is exactly the inline-credential form it always was.
+        val keychainEntries by viewModel.keychainEntries.collectAsState()
+        val matchingEntries = keychainEntries.filter { it.kind == viewModel.authType }
+        if (viewModel.keychainAvailable && (matchingEntries.isNotEmpty() || viewModel.useKeychain)) {
+            Text(text = stringResource(R.string.host_form_keychain_source))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Spacing.minTouch)
+                    .clickable { viewModel.useKeychain = false },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = !viewModel.useKeychain,
+                    onClick = { viewModel.useKeychain = false }
+                )
+                Text(text = stringResource(R.string.host_form_keychain_inline))
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Spacing.minTouch)
+                    .clickable { viewModel.useKeychain = true },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = viewModel.useKeychain,
+                    onClick = { viewModel.useKeychain = true }
+                )
+                Text(text = stringResource(R.string.host_form_keychain_entry))
+            }
+            if (viewModel.useKeychain) {
+                if (matchingEntries.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.host_form_keychain_none_of_kind),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                matchingEntries.forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Spacing.minTouch)
+                            .clickable { viewModel.selectedKeychainEntryId = entry.id },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = viewModel.selectedKeychainEntryId == entry.id,
+                            onClick = { viewModel.selectedKeychainEntryId = entry.id }
+                        )
+                        Column {
+                            Text(text = entry.label)
+                            entry.fingerprint?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                viewModel.errors["keychainEntry"]?.let {
+                    Text(text = it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(modifier = Modifier.height(Spacing.small))
+        }
+        if (viewModel.useKeychain) {
+            Text(
+                text = stringResource(R.string.host_form_keychain_note),
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else if (viewModel.authType == AuthType.PASSWORD) {
             OutlinedTextField(
                 value = viewModel.password,
                 onValueChange = { viewModel.password = it },
@@ -181,6 +259,35 @@ fun HostFormScreen(
             placeholder = stringResource(R.string.field_tags_hint),
             error = null
         )
+        Spacer(modifier = Modifier.height(Spacing.medium))
+        Field(
+            value = viewModel.groupName,
+            onChange = { viewModel.groupName = it },
+            label = stringResource(R.string.field_group),
+            placeholder = stringResource(R.string.field_group_hint),
+            error = null
+        )
+        Spacer(modifier = Modifier.height(Spacing.medium))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.field_favorite),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = stringResource(R.string.field_favorite_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = viewModel.favorite,
+                onCheckedChange = { viewModel.favorite = it }
+            )
+        }
         Spacer(modifier = Modifier.height(Spacing.large))
         PrimaryAction(
             label = stringResource(R.string.action_save),
