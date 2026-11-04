@@ -48,20 +48,6 @@ jobs:
           set -o pipefail
           ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee gradle-assemble.log
 
-      # Diagnosis aid: on failure, push the Gradle error lines (no
-      # secrets: compiler/test output only) to the throwaway `ci-logs`
-      # branch so a red run can be triaged without downloading logs.
-      - name: Publish build error log
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p /tmp/cilog && cd /tmp/cilog
-          git init -q && git config user.name ci-logs && git config user.email ci-logs@example.invalid
-          grep -E "^e: |^w: .*Unresolved|What went wrong|Execution failed|error:|FAILED" -A3 "$GITHUB_WORKSPACE/gradle-assemble.log" | head -c 60000 > "errors-assemble-$GITHUB_RUN_NUMBER.txt" || true
-          git add . && git commit -qm "build errors run $GITHUB_RUN_NUMBER"
-          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs
-
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -73,17 +59,6 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee gradle-test.log
-
-      - name: Publish unit-test error log
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p /tmp/cilog2 && cd /tmp/cilog2
-          git init -q && git config user.name ci-logs && git config user.email ci-logs@example.invalid
-          grep -E "^e: | FAILED|What went wrong|AssertionError|Exception" -A3 "$GITHUB_WORKSPACE/gradle-test.log" | head -c 60000 > "errors-tests-$GITHUB_RUN_NUMBER.txt" || true
-          git add . && git commit -qm "test errors run $GITHUB_RUN_NUMBER"
-          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs-tests
 
       # Replaces the previous rolling release with this build. It is NOT a
       # pre-release: GitHub hides pre-releases from the repository sidebar,
@@ -128,9 +103,6 @@ jobs:
   # per run, used only inside the wrapper, and never committed.
   instrumented:
     runs-on: ubuntu-latest
-    # Needed only to push the secret-free triage excerpt branch.
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -174,40 +146,6 @@ jobs:
           ram-size: 4096M
           script: bash tests/fixture/run-instrumented-with-fixture.sh
 
-      # Diagnosis aid (secret-free excerpts only: test names, failure
-      # messages, the crypto probe line, the fixture sshd log lines the
-      # wrapper already prints). The wrapper scrubs the per-run secrets
-      # from result files before this runs.
-      - name: Publish instrumented triage excerpt
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p /tmp/cilog3 && cd /tmp/cilog3
-          git init -q && git config user.name ci-logs && git config user.email ci-logs@example.invalid
-          OUT="instr-$GITHUB_RUN_NUMBER.txt"
-          : > "$OUT"
-          for f in "$GITHUB_WORKSPACE"/gradle-attempt-*.log; do
-            [ -f "$f" ] || continue
-            echo "=== $(basename "$f")" >> "$OUT"
-            grep -E "CRYPTO_PROBE|GRADLE_ATTEMPT|Starting [0-9]+ tests|FAILED|PASSED|SKIPPED|tests completed|POSTFAIL: sshd|Unknown API|PropertyFetcher" "$f" | grep -v "^[[:space:]]*at " | head -c 20000 >> "$OUT" || true
-            echo "--- what went wrong / tail" >> "$OUT"
-            grep -E "What went wrong|Process crashed|Test run failed|Instrumentation|INSTRUMENTATION|Exception|crash|ANR|No tests" -A4 "$f" | grep -v "^[[:space:]]*at " | head -c 8000 >> "$OUT" || true
-            tail -n 40 "$f" | grep -v "^[[:space:]]*at " >> "$OUT" || true
-          done
-          echo "=== vnc fixture status" >> "$OUT"
-          tail -n 40 /tmp/termbridge-vnc-status.txt >> "$OUT" 2>/dev/null || true
-          echo "=== sshd.log tail" >> "$OUT"
-          sudo tail -n 60 /tmp/termbridge-sshd-fixture/sshd.log >> "$OUT" 2>/dev/null || true
-          echo "=== sshd.log key-user lines" >> "$OUT"
-          sudo grep -E "termbridge-key|publickey|Authentication refused|locked|not allowed|userauth|Failed " /tmp/termbridge-sshd-fixture/sshd.log | tail -60 >> "$OUT" 2>/dev/null || true
-          echo "=== result xml failures" >> "$OUT"
-          find "$GITHUB_WORKSPACE/app/build/outputs/androidTest-results" -name 'TEST-*.xml' 2>/dev/null | while read -r x; do
-            grep -h -E "<testcase|<failure|<skipped" -A3 "$x" | head -c 40000 >> "$OUT" || true
-          done
-          git add . && git commit -qm "instrumented triage run $GITHUB_RUN_NUMBER"
-          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-logs-instr
-
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -220,3 +158,50 @@ jobs:
         run: |
           cat /home/runner/.android/avd/test.avd/config.ini || echo "NO_AVD_CONFIG"
           grep -n "hw.cpu.ncore\|hw.ramSize" /home/runner/.android/avd/test.avd/config.ini || true
+
+  vnc:
+    # Item F-03a: VNC proof in its OWN job. The desktop stack
+    # (Xvfb + x11vnc) is installed here, on this job's runner —
+    # never inside the emulator job, where it hung the run
+    # twice and was reverted. The live tests skip everywhere
+    # else (TB_VNC_* unset), so this job is the only place
+    # they can pass — and it fails if they fail.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "cmdline-tools;latest" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle (uses the committed wrapper, 8.10.2)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Start the VNC fixture (Xvfb + x11vnc, 800x600)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb x11vnc
+          VNC_PASS="$(openssl rand -hex 6)"
+          printf '%s' "$VNC_PASS" > /tmp/tb-vnc-pass
+          Xvfb :99 -screen 0 800x600x24 &
+          sleep 3
+          x11vnc -storepasswd "$VNC_PASS" /tmp/tb-vncauth
+          x11vnc -display :99 -rfbport 5901 -rfbauth /tmp/tb-vncauth -localhost -forever -shared -bg -o /tmp/tb-x11vnc.log
+          sleep 2
+          (exec 3<>/dev/tcp/127.0.0.1/5901) && echo "VNC fixture ready"
+
+      - name: Run the live RFB tests
+        run: |
+          export TB_VNC_HOST=127.0.0.1
+          export TB_VNC_PORT=5901
+          export TB_VNC_PASS="$(cat /tmp/tb-vnc-pass)"
+          ./gradlew :app:testDebugUnitTest --tests "com.pishi.termbridge.RfbLiveTest" --stacktrace
