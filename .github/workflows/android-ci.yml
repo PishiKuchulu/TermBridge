@@ -71,11 +71,21 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk TermBridge-debug.apk
           gh release delete debug-latest --cleanup-tag --yes || true
-          gh release create debug-latest TermBridge-debug.apk \
-            --latest \
-            --target "$GITHUB_SHA" \
-            --title "TermBridge debug build (latest)" \
-            --notes "Debug-signed APK built by CI from commit $GITHUB_SHA. Not a release build."
+          # Retry the create: the releases API returned HTTP 502 in
+          # runs #63 and #65, and a failed create after the delete
+          # above leaves NO release at all. Three attempts, 15 s apart.
+          for attempt in 1 2 3; do
+            if gh release create debug-latest TermBridge-debug.apk \
+              --latest \
+              --target "$GITHUB_SHA" \
+              --title "TermBridge debug build (latest)" \
+              --notes "Debug-signed APK built by CI from commit $GITHUB_SHA. Not a release build."; then
+              break
+            fi
+            echo "gh release create failed (attempt $attempt/3)"
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 15
+          done
 
       # Prompt 15: machine-readable test output even on failure,
       # so a red run still yields its XML reports for triage.
