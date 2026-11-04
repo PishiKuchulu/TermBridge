@@ -1,0 +1,4 @@
+=== vnc fixture status
+=== sshd.log tail
+=== sshd.log key-user lines
+=== result xml failures
