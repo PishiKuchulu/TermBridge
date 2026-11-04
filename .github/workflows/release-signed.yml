@@ -1,0 +1,84 @@
+# TermBridge signed release — item R-06.
+# Separate from android-ci.yml on purpose: this workflow is
+# the only one that touches the release keystore secrets,
+# and it runs only when a human asks (workflow_dispatch) or
+# a version tag is pushed. It builds the R8-minified release
+# APK with the env-driven signing config in
+# app/build.gradle.kts, verifies the signature and the
+# 16 KB page alignment, and publishes the APK as a GitHub
+# release asset on tag runs (artifact-only on dispatch).
+# Secret setup: docs/RELEASE_SIGNING.md.
+name: Signed Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TB_KEYSTORE_FILE: ${{ github.workspace }}/release-keystore.jks
+      TB_KEYSTORE_PASSWORD: ${{ secrets.TB_KEYSTORE_PASSWORD }}
+      TB_KEY_ALIAS: ${{ secrets.TB_KEY_ALIAS }}
+      TB_KEY_PASSWORD: ${{ secrets.TB_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "cmdline-tools;latest" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle (uses the committed wrapper, 8.10.2)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode the release keystore from secrets
+        env:
+          TB_KEYSTORE_B64: ${{ secrets.TB_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$TB_KEYSTORE_B64" ]; then
+            echo "::error::TB_KEYSTORE_B64 secret is not set — see docs/RELEASE_SIGNING.md"
+            exit 1
+          fi
+          echo "$TB_KEYSTORE_B64" | base64 -d > "$TB_KEYSTORE_FILE"
+          echo "Keystore decoded: $(stat -c %s "$TB_KEYSTORE_FILE") bytes (content never printed)"
+
+      - name: Assemble signed release APK (R8)
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Verify signature and 16 KB alignment
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*release*.apk | head -1)
+          echo "Verifying $APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | grep -E "Signer #1 certificate DN|Verified" || true
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -v -P 16 -c 4 "$APK" > /dev/null && echo "16 KB alignment OK"
+          cp "$APK" "$GITHUB_WORKSPACE/TermBridge-release.apk"
+
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TermBridge-release-apk
+          path: TermBridge-release.apk
+
+      - name: Attach to the GitHub release (tag runs only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" TermBridge-release.apk \
+            --title "TermBridge ${GITHUB_REF_NAME}" \
+            --generate-notes \
+          || gh release upload "${GITHUB_REF_NAME}" TermBridge-release.apk --clobber
