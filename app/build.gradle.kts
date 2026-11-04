@@ -100,6 +100,7 @@ dependencies {
     // Verified against the ADR before adding: version, group, and
     // licence match the prompt-01 record (13 May 2025 sources).
     implementation(libs.sshj)
+    implementation(libs.bouncycastle.bcprov)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.biometric)
     // Compose BOM must be declared inside dependencies {}, not at the
