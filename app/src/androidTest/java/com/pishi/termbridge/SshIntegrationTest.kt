@@ -26,6 +26,7 @@ import com.pishi.termbridge.domain.HostKeyVerification
 import com.pishi.termbridge.transport.JumpHopRequest
 import com.pishi.termbridge.transport.SshConnection
 import com.pishi.termbridge.transport.SshConnectionRequest
+import com.pishi.termbridge.transport.SshExecChannel
 import com.pishi.termbridge.transport.SshError
 import com.pishi.termbridge.transport.SshTransport
 import com.pishi.termbridge.transport.SshTransportException
@@ -729,6 +730,15 @@ class SshIntegrationTest {
      * (reached from the emulator as the host's loopback) and
      * carries traffic back to the echo service; cancelling
      * the one forward unbinds it.
+     *
+     * Run #67: the remote target must be the fixture host, not
+     * 127.0.0.1. For a REMOTE forward, sshj's
+     * SocketForwardingConnectListener connects to the target
+     * FROM THE CLIENT side, so 127.0.0.1 would mean the
+     * emulator itself — where no echo service listens — and
+     * the forwarded connection is refused/reset. The local
+     * forward keeps 127.0.0.1 because its targets resolve
+     * server-side. Only this remote test's target changes.
      */
     @Test
     fun remoteForwardBindsAndCancelUnbinds() = runTest(timeout = 5.minutes) {
@@ -740,7 +750,7 @@ class SshIntegrationTest {
             val config = TunnelConfig(
                 id = 902, hostId = 0, kind = TunnelKind.REMOTE,
                 bindAddress = "127.0.0.1", bindPort = 19_090,
-                targetHost = "127.0.0.1", targetPort = SshFixture.echoPort,
+                targetHost = SshFixture.host, targetPort = SshFixture.echoPort,
                 label = "it-remote"
             )
             manager.startRemote(conn, config)
@@ -758,8 +768,16 @@ class SshIntegrationTest {
     /**
      * Item T-20: a jump chain through the bastion fixture sshd
      * reaches the main fixture sshd (addressed as 127.0.0.1
-     * from the bastion's side) and runs a shell; a wrong target
+     * from the bastion's side) and runs a command; a wrong target
      * password fails the chain with AuthFailed.
+     *
+     * Run #67: connectChain returns ChainedSshConnection, not
+     * SshjConnection, so the shell() helper's asSshj cast (and
+     * TerminalSession, which also requires SshjConnection)
+     * cannot verify the chain. Both connection holders implement
+     * SshExecChannel, so verification runs one exec command
+     * over that interface instead — no production change, and
+     * the reject path below is untouched.
      */
     @Test
     fun jumpChainReachesTargetAndRejectFailsCleanly() = runTest(timeout = 5.minutes) {
@@ -797,11 +815,11 @@ class SshIntegrationTest {
         }
         try {
             assertTrue(conn.isConnected)
-            shell(conn) { session ->
-                session.sendText("echo CHAIN_OK | tr 'A-Z' 'a-z'")
-                session.sendEnter()
-                awaitOutput(session, "chain_ok")
-            }
+            val exec = conn as? SshExecChannel
+                ?: throw AssertionError("Chain connection does not support exec")
+            val output = exec.execOnce("echo CHAIN_OK | tr 'A-Z' 'a-z'")
+            assertTrue("exec over the jump chain must return chain_ok, got: $output",
+                output.contains("chain_ok"))
         } finally {
             conn.disconnect()
         }
