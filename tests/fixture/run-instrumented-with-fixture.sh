@@ -169,6 +169,15 @@ while [ "$ATTEMPT" -le 3 ]; do
      && grep -q -e "Unknown API Level" -e "PropertyFetcher" -e "Cannot install split APKs" "gradle-attempt-$ATTEMPT.log"; then
     echo "GRADLE_ATTEMPT: $ATTEMPT failed on a flaky first-contact signature; retrying in 30s"
     sleep 30
+    # Run #68 attempt 2: attempts 1-2 failed property fetch
+    # (PropertyFetcher unresponsive) while CLI getprop on the same
+    # device answered sdk=29, and attempt 3 then rejected the
+    # install with a self-contradictory 29/<21 message. Retries
+    # reuse the warm daemon (see header comment), so device
+    # state from the failed first contact may survive into later
+    # attempts. Stop the daemon so the next attempt re-establishes
+    # the device connection from scratch.
+    ./gradlew --stop || true
     ATTEMPT=$((ATTEMPT + 1))
     continue
   fi
