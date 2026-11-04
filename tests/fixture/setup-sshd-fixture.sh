@@ -110,7 +110,13 @@ sudo chmod 644 "$FIXTURE_DIR/client_key"
 # exists to prove exactly that path end to end.
 sudo rm -f "$FIXTURE_DIR/client_key_rsa" "$FIXTURE_DIR/client_key_rsa.pub"
 sudo ssh-keygen -t rsa -b 3072 -f "$FIXTURE_DIR/client_key_rsa" -N "" -q
-sudo cat "$FIXTURE_DIR/client_key_rsa.pub" >> "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER"
+# NOTE: the append must run under sudo (tee -a), not as
+# `sudo cat ... >> file` — a redirect is performed by the
+# calling shell, so with a root-owned authorized_keys file
+# (created by the sudo cp above) the unprivileged redirect
+# fails with Permission denied. That exact failure killed
+# CI run #63's instrumented job at this line.
+cat "$FIXTURE_DIR/client_key_rsa.pub" | sudo tee -a "$FIXTURE_DIR/authorized_keys_$FIXTURE_KEY_USER" >/dev/null
 sudo chmod 644 "$FIXTURE_DIR/client_key_rsa"
 
 sudo tee "$FIXTURE_DIR/sshd_config" >/dev/null <<EOF
