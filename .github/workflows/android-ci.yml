@@ -96,6 +96,16 @@ jobs:
           name: unit-test-reports
           path: app/build/test-results/testDebugUnitTest/
 
+      # Audit #3 item A-08 (partial): Android Lint runs on every
+      # push so findings are visible in the job log. It is
+      # non-blocking for now (continue-on-error) because the
+      # project has no lint baseline yet; promoting it to a
+      # gate is a separate owner decision once the backlog of
+      # findings is triaged.
+      - name: Run Android Lint (non-blocking, A-08)
+        continue-on-error: true
+        run: ./gradlew :app:lintDebug --stacktrace
+
   # Prompt 15: instrumented suite on an emulator, as a separate
   # job so an emulator failure does not hide the unit-test signal
   # and vice versa. Remediation phase 7: the instrumented run
