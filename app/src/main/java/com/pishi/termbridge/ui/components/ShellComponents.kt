@@ -121,3 +121,32 @@ fun UnavailableRow(
         )
     }
 }
+
+/**
+ * Audit #3 (A-17): the shared discard-confirmation for editors
+ * that hold unsaved changes. Shown when a guarded Back press (or
+ * a dialog dismiss) would otherwise silently drop the edits;
+ * "Keep editing" returns to the form untouched, "Discard" is
+ * the only path that throws the changes away.
+ */
+@Composable
+fun DiscardChangesDialog(
+    onDiscard: () -> Unit,
+    onKeepEditing: () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onKeepEditing,
+        title = { Text(text = stringResource(R.string.discard_changes_title)) },
+        text = { Text(text = stringResource(R.string.discard_changes_body)) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDiscard) {
+                Text(text = stringResource(R.string.action_discard))
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onKeepEditing) {
+                Text(text = stringResource(R.string.action_keep_editing))
+            }
+        }
+    )
+}

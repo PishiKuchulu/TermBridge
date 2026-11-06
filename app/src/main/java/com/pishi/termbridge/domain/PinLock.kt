@@ -18,7 +18,20 @@ import javax.crypto.spec.PBEKeySpec
 object PinLock {
     const val MIN_LENGTH = 4
     const val MAX_LENGTH = 12
-    const val ITERATIONS = 120_000
+
+    /**
+     * Current PBKDF2 cost for the app lock — audit #3 (A-23)
+     * raised it to match the backup export's 600,000
+     * (security/ExportCrypto). Hashes stored by older builds
+     * were computed at [LEGACY_ITERATIONS]; because the count
+     * is not stored with the hash, verification tries the
+     * current cost first and falls back to the legacy one,
+     * re-hashing on a legacy success (see AppLockStore).
+     */
+    const val ITERATIONS = 600_000
+
+    /** The cost used before audit #3 (A-23); verify-only. */
+    const val LEGACY_ITERATIONS = 120_000
     private const val SALT_BYTES = 16
     private const val KEY_BITS = 256
 

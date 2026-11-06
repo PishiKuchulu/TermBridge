@@ -13,12 +13,15 @@ import com.pishi.termbridge.domain.EnvVarInfo
 import com.pishi.termbridge.domain.EnvironmentValidator
 import com.pishi.termbridge.domain.HostEnvironmentSettings
 import com.pishi.termbridge.domain.RemoteShell
+import com.pishi.termbridge.settings.TranscriptStorage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Prompt 09 per-host environment screen state.
@@ -33,7 +36,8 @@ import kotlinx.coroutines.launch
 class HostEnvironmentViewModel(
     private val environmentRepository: HostEnvironmentRepository,
     private val hostRepository: HostRepository,
-    private val hostId: Long
+    private val hostId: Long,
+    private val transcriptStorage: TranscriptStorage? = null
 ) : ViewModel() {
     val settings: StateFlow<HostEnvironmentSettings?> =
         environmentRepository.getSettings(hostId)
@@ -58,6 +62,15 @@ class HostEnvironmentViewModel(
     var settingsErrors by mutableStateOf<Map<String, String>>(emptyMap())
     var settingsSaved by mutableStateOf(false)
     var saveError by mutableStateOf<String?>(null)
+
+    /** Audit #3 (A-05): whether a saved transcript exists for
+     *  this host (probed once from storage; the storage API
+     *  has no existence check, so an empty read means none),
+     *  and the one-shot confirmation after deleting it. */
+    var hasTranscript by mutableStateOf(false)
+        private set
+    var transcriptDeleted by mutableStateOf(false)
+        private set
     var isSaving by mutableStateOf(false)
 
     private var settingsLoaded = false
@@ -65,6 +78,14 @@ class HostEnvironmentViewModel(
     init {
         viewModelScope.launch {
             hostRepository.getHost(hostId)?.let { hostName = it.name }
+        }
+        val storage = transcriptStorage
+        if (storage != null) {
+            viewModelScope.launch {
+                hasTranscript = withContext(Dispatchers.IO) {
+                    storage.read(hostId).isNotEmpty()
+                }
+            }
         }
         // Prefill the form once from stored settings; after that,
         // the form is the user's, not the database's, until save.
@@ -168,17 +189,31 @@ class HostEnvironmentViewModel(
             }
         }
     }
+
+    /** Audit #3 (A-05): permanently deletes this host's saved
+     *  transcript (the live file and its rotated copy). */
+    fun deleteTranscript() {
+        val storage = transcriptStorage ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { storage.clear(hostId) }
+            hasTranscript = false
+            transcriptDeleted = true
+        }
+    }
 }
 
 class HostEnvironmentViewModelFactory(
     private val environmentRepository: HostEnvironmentRepository,
     private val hostRepository: HostRepository,
-    private val hostId: Long
+    private val hostId: Long,
+    private val transcriptStorage: TranscriptStorage? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HostEnvironmentViewModel::class.java)) {
-            return HostEnvironmentViewModel(environmentRepository, hostRepository, hostId) as T
+            return HostEnvironmentViewModel(
+                environmentRepository, hostRepository, hostId, transcriptStorage
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

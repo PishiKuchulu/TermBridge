@@ -37,6 +37,8 @@
     <string name="field_private_key">Private key (PEM)</string>
     <string name="field_private_key_hint">Paste the PEM private key here</string>
     <string name="field_passphrase">Key passphrase (optional)</string>
+    <string name="secret_show">Show secret</string>
+    <string name="secret_hide">Hide secret</string>
     <string name="field_passphrase_hint">Only for encrypted private keys</string>
     <string name="passphrase_not_stored_note">The passphrase is never stored. It will be asked again when you connect.</string>
     <string name="field_notes">Notes (optional)</string>
@@ -68,6 +70,11 @@
     <string name="action_delete_host">Delete host</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_discard">Discard</string>
+    <string name="action_keep_editing">Keep editing</string>
+    <string name="action_leave">Leave</string>
+    <string name="discard_changes_title">Discard changes?</string>
+    <string name="discard_changes_body">You have unsaved changes. If you go back now, they will be lost.</string>
     <string name="action_copy">Copy</string>
     <string name="delete_host_title">Delete this host?</string>
     <string name="delete_host_body">Delete %1$s? Its stored credential will be deleted too. This cannot be undone.</string>
@@ -142,6 +149,10 @@
     <string name="files_rename">Rename</string>
     <string name="files_delete">Delete</string>
     <string name="files_directory">Directory</string>
+    <string name="files_file">File</string>
+    <string name="files_special">Special file</string>
+    <string name="files_leave_title">Transfer in progress</string>
+    <string name="files_leave_body">A file transfer is still running. If you leave this screen, the transfer will stop.</string>
     <string name="files_empty_dir">This directory is empty.</string>
     <string name="rename_dialog_title">Rename</string>
     <string name="rename_dialog_hint">New name</string>
@@ -261,6 +272,10 @@
     <string name="env_log_label">Record a session transcript</string>
     <string name="env_log_hint">Keeps a local, scrubbed copy of what the terminal shows for this host, capped at 256 KB with one rotated copy. It stays on this device and is never sent anywhere.</string>
     <string name="env_log_backup_label">Include the transcript in encrypted backups</string>
+    <string name="env_delete_transcript">Delete saved transcript</string>
+    <string name="env_delete_transcript_title">Delete saved transcript?</string>
+    <string name="env_delete_transcript_body">The saved session transcript for this host will be permanently deleted from this device.</string>
+    <string name="env_transcript_deleted">Saved transcript deleted.</string>
     <string name="env_log_backup_hint">Only encrypted backups carry it, and only while recording is on. Plain backups never contain a transcript.</string>
     <string name="env_fallback_label">Export fallback for refused variables</string>
     <string name="env_fallback_hint">When the server refuses a variable (its sshd has no matching AcceptEnv), type an export line for it into the new shell instead. The lines are visible on screen and in the shell history, values included — do not use this for secrets the server should hold only in the environment.</string>
@@ -407,6 +422,7 @@
     <string name="terminal_enter_fullscreen">Expand the terminal to full screen</string>
     <string name="terminal_exit_fullscreen">Exit full-screen terminal</string>
     <string name="terminal_jump_to_latest">Jump to latest (%1$d new lines)</string>
+    <string name="terminal_output_description">Terminal output</string>
     <string name="session_live_indicator">Live session — return to terminal</string>
 
     <!-- Prompt 14: diagnostics labels, previously hardcoded. -->
@@ -417,12 +433,26 @@
     <string name="about_title">About and licenses</string>
     <string name="about_body">TermBridge is an independent app for managing remote servers over SSH. It is not affiliated with any other terminal or remote-access product, and it contains no copied branding, code, or assets from one.</string>
     <string name="about_licenses_title">Libraries</string>
-    <string name="about_licenses_body">Jetpack Compose (BOM 2024.09.00), Navigation Compose 2.8.0, Kotlin Coroutines 1.8.1, Room 2.6.1, sshj 0.40.0, kotlinx-serialization-json 1.7.3, Material Icons Extended (Compose BOM 2024.09.00), and the AndroidX core, lifecycle, and activity libraries — all Apache License 2.0. Test-only dependencies (JUnit, Espresso, Compose UI test) are not shipped in the app.</string>
+    <string name="about_licenses_body">Jetpack Compose (BOM 2024.09.00), Navigation Compose 2.8.0, Kotlin Coroutines 1.8.1, Room 2.6.1, sshj 0.40.0, kotlinx-serialization-json 1.7.3, Material Icons Extended (Compose BOM 2024.09.00), and the AndroidX core, lifecycle, and activity libraries — all Apache License 2.0. Bouncy Castle 1.85 is used under the Bouncy Castle Licence. Test-only dependencies (JUnit, Espresso, Compose UI test) are not shipped in the app.</string>
 
     <string name="settings_section_terminal">Terminal</string>
     <string name="settings_section_session">Session</string>
     <string name="settings_section_security">Security &amp; privacy</string>
     <string name="settings_section_data">Data &amp; support</string>
+    <string name="settings_section_update">App update</string>
+    <string name="settings_expand_section">Expand section</string>
+    <string name="settings_collapse_section">Collapse section</string>
+    <string name="update_current_version">Current version</string>
+    <string name="update_check_action">Check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_up_to_date">This is the latest version.</string>
+    <string name="update_available">Version %1$s is available.</string>
+    <string name="update_download_action">Download update</string>
+    <string name="update_check_failed">Could not check for updates. Try again later.</string>
+    <string name="settings_clear_history">Clear command history</string>
+    <string name="settings_clear_history_title">Clear command history?</string>
+    <string name="settings_clear_history_body">Every remembered command used for autocomplete will be removed from this device. This cannot be undone.</string>
+    <string name="settings_history_cleared">Command history cleared.</string>
     <string name="settings_font_size">Font size</string>
     <string name="settings_font_size_value">%1$d sp</string>
     <string name="settings_scrollback">Scrollback buffer</string>
@@ -563,6 +593,13 @@
     <string name="history_import_title">Import shell history?</string>
     <string name="history_import_body">This reads the history files of your shell on the connected server (~/.bash_history, ~/.zsh_history, fish history) over a separate channel — nothing is typed into the session. Lines that look like secrets are filtered out, and the result is stored only on this device for autocomplete.</string>
     <string name="history_import_confirm">Import</string>
+    <string name="history_import_preview_title">Review shell history import</string>
+    <string name="history_import_preview_body">%1$d commands passed the filters. Only these lines will be stored on this device for autocomplete — the first ones are:</string>
+    <string name="shake_confirm_disconnect_title">Disconnect?</string>
+    <string name="shake_confirm_disconnect_body">A shake was detected, and shaking is set to disconnect this session. Disconnect now?</string>
+    <string name="shake_confirm_clear_title">Clear the screen?</string>
+    <string name="shake_confirm_clear_body">A shake was detected, and shaking is set to clear the terminal screen. Clear it now?</string>
+    <string name="session_shell_mismatch_warning">Warning: the detected OS does not match the shell set for this host. Command buttons are quoted for the set shell — check the host’s shell under Environment.</string>
     <string name="settings_detect_os">Detect the server OS on connect</string>
     <string name="settings_detect_os_hint">Runs a small probe over a separate channel when a session connects (never typed into the shell) and shows the result. You can also detect manually from the session screen at any time.</string>
     <string name="session_detect_os">Detect OS</string>
@@ -628,11 +665,20 @@
     <string name="desktop_connect">Connect</string>
     <string name="desktop_connecting">Connecting…</string>
     <string name="desktop_disconnect">Disconnect</string>
+    <string name="desktop_leave_title">Leave the desktop session?</string>
+    <string name="desktop_leave_body">A VNC session is connected to this desktop. Are you sure you want to leave this screen?</string>
     <string name="desktop_connected_to">Connected to %1$s</string>
     <string name="desktop_warning">VNC is not encrypted. Use it on a trusted network, or through a VPN or SSH tunnel.</string>
     <string name="desktop_rdp_note">Windows Remote Desktop (RDP) is not supported yet. For Windows, install a VNC server (for example TightVNC, UltraVNC or RealVNC) and connect to it here.</string>
     <string name="desktop_hint_touch">Tap to click, long-press for right-click, drag to move or drag items.</string>
     <string name="desktop_key_esc">Esc</string>
+    <string name="desktop_key_ctrl">Ctrl</string>
+    <string name="desktop_key_alt">Alt</string>
+    <string name="desktop_key_shift">Shift</string>
+    <string name="desktop_key_arrow_left">←</string>
+    <string name="desktop_key_arrow_up">↑</string>
+    <string name="desktop_key_arrow_down">↓</string>
+    <string name="desktop_key_arrow_right">→</string>
     <string name="desktop_key_tab">Tab</string>
     <string name="desktop_key_enter">Enter</string>
     <string name="desktop_key_backspace">Backspace</string>
@@ -668,4 +714,51 @@
     <string name="onboarding_privacy_body">Passwords and private keys are encrypted with a key in the Android Keystore and never leave the device. Every server\'s host key is verified against its fingerprint before you are asked to trust it. There is no account and no telemetry.</string>
     <string name="onboarding_start_title">Add a server to begin</string>
     <string name="onboarding_start_body">You will need a hostname, a username, and a password or private key. You can also import a key from a file, or generate one in the Keychain later.</string>
+
+    <!-- Audit #3 (A-09): ViewModel-originated messages, previously
+         hardcoded English in BackupViewModel / FilesViewModel /
+         SessionViewModel. ViewModels now carry these as resource
+         ids (UiMessage) and the screens resolve them. -->
+    <string name="vm_error_host_not_found">Host not found.</string>
+    <string name="vm_error_no_credential">No credential stored for this host. Edit the host and add one.</string>
+    <string name="vm_error_connection_failed">Connection failed. Please try again.</string>
+    <string name="files_error_sftp_start">SFTP could not start on this connection.</string>
+    <string name="files_error_list_directory">Could not list this directory.</string>
+    <string name="files_error_invalid_directory_name">Invalid directory name.</string>
+    <string name="files_error_invalid_name">Invalid name.</string>
+    <string name="files_error_delete_not_empty">%1$s Empty the directory first — recursive delete is not supported.</string>
+    <string name="files_error_no_local_folder">No local folder is set for this host.</string>
+    <string name="files_error_read_folder">Could not read the selected folder.</string>
+    <string name="files_error_name_unusable_on_server">That file name cannot be used on the server.</string>
+    <string name="files_error_open_selected_file">Could not open the selected file.</string>
+    <string name="files_error_upload_failed">Upload failed. Please try again.</string>
+    <string name="files_error_name_unsavable_locally">This file name cannot be saved locally.</string>
+    <string name="files_error_write_local_folder">Could not write to the host local folder. Check the folder in the host environment settings, or download with the file picker instead.</string>
+    <string name="files_error_open_destination">Could not open the destination file.</string>
+    <string name="files_error_download_failed">Download failed. Please try again.</string>
+    <string name="files_info_workdir_fallback">Working directory not available — started at root.</string>
+    <string name="files_info_deleted">Deleted %1$d item(s).</string>
+    <string name="files_info_deleted_partial">Deleted %1$d item(s); %2$d could not be deleted.</string>
+    <string name="files_info_queued_downloads">Queued %1$d download(s).</string>
+    <string name="files_info_queued_uploads">Queued %1$d upload(s).</string>
+    <string name="files_info_queued_uploads_skipped">Queued %1$d upload(s); %2$d skipped (name already exists).</string>
+    <string name="files_info_queued_uploads_folder">Queued %1$d upload(s) from the folder.</string>
+    <string name="session_error_terminal_start">Terminal could not start on this connection.</string>
+    <string name="session_shell_closed">Shell closed by the server.</string>
+    <string name="session_connection_lost">Connection lost.</string>
+    <string name="session_unknown_os">Unknown OS</string>
+    <string name="history_import_needs_session">History import needs a live session.</string>
+    <string name="history_import_running">Importing shell history…</string>
+    <string name="history_import_failed">Shell history import failed.</string>
+    <string name="history_import_done">Imported %1$d new commands (%2$d usable lines read).</string>
+    <string name="backup_error_passphrase_too_short">Passphrase must be at least %1$d characters.</string>
+    <string name="backup_error_passphrase_mismatch">Passphrases do not match.</string>
+    <string name="backup_error_create_failed">Could not create the export.</string>
+    <string name="backup_error_save_failed">Could not save the export.</string>
+    <string name="backup_error_read_failed">Could not read the chosen file.</string>
+    <string name="backup_error_apply_failed">Could not apply the import.</string>
+    <string name="backup_error_open_file">Could not open the chosen file.</string>
+    <string name="backup_error_open_for_writing">Could not open the chosen file for writing.</string>
+    <string name="backup_error_file_too_large">Backup file is too large.</string>
+    <string name="backup_info_export_saved">Export saved.</string>
 </resources>

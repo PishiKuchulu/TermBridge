@@ -3,6 +3,7 @@ package com.pishi.termbridge
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,11 @@ class MainActivity : FragmentActivity() {
      *  session route is showing (item T-19); null everywhere
      *  else, where the keys keep their system behaviour. */
     private var volumeKeyHandler: ((com.pishi.termbridge.domain.VolumeKey, Boolean) -> Boolean)? = null
+
+    // Audit #3 (A-26): one consumed-flag PER KEY. A single
+    // shared flag let one key's consumed keydown swallow the
+    // other key's keyup.
+    private var volumeUpConsumed = false
     private var volumeDownConsumed = false
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
@@ -56,7 +62,10 @@ class MainActivity : FragmentActivity() {
         if (key != null) {
             val consumed = volumeKeyHandler?.invoke(key, (event?.repeatCount ?: 0) > 0) == true
             if (consumed) {
-                volumeDownConsumed = true
+                when (key) {
+                    com.pishi.termbridge.domain.VolumeKey.UP -> volumeUpConsumed = true
+                    com.pishi.termbridge.domain.VolumeKey.DOWN -> volumeDownConsumed = true
+                }
                 return true
             }
         }
@@ -64,12 +73,15 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean {
-        if ((keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
-                keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) &&
-            volumeDownConsumed
-        ) {
-            volumeDownConsumed = false
-            return true
+        when (keyCode) {
+            android.view.KeyEvent.KEYCODE_VOLUME_UP -> if (volumeUpConsumed) {
+                volumeUpConsumed = false
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> if (volumeDownConsumed) {
+                volumeDownConsumed = false
+                return true
+            }
         }
         return super.onKeyUp(keyCode, event)
     }
@@ -158,6 +170,14 @@ class MainActivity : FragmentActivity() {
                             volumeKeyHandler = handler
                         }
                     )
+                    // Audit #3 (A-11): while the lock overlay is
+                    // shown, Back is consumed here (deliberately
+                    // empty) so it cannot pop or navigate the
+                    // graph underneath the overlay. Enabled only
+                    // in exactly the state that shows the overlay.
+                    BackHandler(enabled = locked && lockEnabled) {
+                        // Consumed: the lock overlay owns Back.
+                    }
                     if (locked && lockEnabled) {
                         LockScreen(
                             store = app.appLock,

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -29,8 +30,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.pishi.termbridge.R
+import com.pishi.termbridge.ui.resolve
 import com.pishi.termbridge.ui.components.PrimaryAction
 import com.pishi.termbridge.ui.components.SecondaryAction
 import com.pishi.termbridge.ui.theme.Spacing
@@ -157,6 +160,7 @@ fun BackupScreen(
                 label = { Text(stringResource(R.string.backup_passphrase)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(Spacing.medium))
@@ -166,6 +170,7 @@ fun BackupScreen(
                 label = { Text(stringResource(R.string.backup_passphrase_confirm)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(Spacing.small))
@@ -196,6 +201,7 @@ fun BackupScreen(
             placeholder = { Text(stringResource(R.string.backup_import_passphrase_hint)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -324,11 +330,11 @@ fun BackupScreen(
 
         viewModel.error?.let {
             Spacer(modifier = Modifier.height(Spacing.medium))
-            Text(text = it, color = MaterialTheme.colorScheme.error)
+            Text(text = it.resolve(), color = MaterialTheme.colorScheme.error)
         }
         viewModel.info?.let {
             Spacer(modifier = Modifier.height(Spacing.medium))
-            Text(text = it)
+            Text(text = it.resolve())
         }
     }
 }

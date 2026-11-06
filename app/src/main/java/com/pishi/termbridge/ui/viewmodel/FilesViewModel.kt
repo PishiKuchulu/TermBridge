@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.pishi.termbridge.R
 import com.pishi.termbridge.data.HostEnvironmentRepository
 import com.pishi.termbridge.data.HostRepository
 import com.pishi.termbridge.domain.AuthType
@@ -24,6 +25,7 @@ import com.pishi.termbridge.transport.SshConnectionRequest
 import com.pishi.termbridge.transport.SshTransport
 import com.pishi.termbridge.transport.SshTransportException
 import com.pishi.termbridge.transport.SshjConnection
+import com.pishi.termbridge.ui.UiMessage
 import java.io.OutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -98,13 +100,15 @@ data class FilesUiState(
     val connectedHost: HostProfile? = null,
     val currentPath: String = "/",
     val entries: List<RemoteEntry> = emptyList(),
-    val errorMessage: String? = null,
+    // Audit #3 (A-09): UiMessage (resource id + args, or
+    // ready-made lower-layer text); the screen resolves.
+    val errorMessage: UiMessage? = null,
     val pendingTrust: PendingTrust? = null,
     val transfer: TransferProgress? = null,
     /** Name of an upload that conflicts with an existing entry. */
     val uploadConflictName: String? = null,
     /** Non-error note (e.g. working-directory fallback). Never a secret. */
-    val infoMessage: String? = null,
+    val infoMessage: UiMessage? = null,
     /** True when the connected host has a local SAF folder set:
      *  downloads then write straight into it (prompt 09). */
     val localFolderAvailable: Boolean = false,
@@ -241,7 +245,7 @@ class FilesViewModel(
                 if (profile == null) {
                     _uiState.value = _uiState.value.copy(
                         status = FilesStatus.FAILED,
-                        errorMessage = "Host not found."
+                        errorMessage = UiMessage.of(R.string.vm_error_host_not_found)
                     )
                     return@launch
                 }
@@ -249,7 +253,7 @@ class FilesViewModel(
                 if (credentialBytes == null) {
                     _uiState.value = _uiState.value.copy(
                         status = FilesStatus.FAILED,
-                        errorMessage = "No credential stored for this host. Edit the host and add one."
+                        errorMessage = UiMessage.of(R.string.vm_error_no_credential)
                     )
                     return@launch
                 }
@@ -271,7 +275,7 @@ class FilesViewModel(
                     conn.disconnect()
                     _uiState.value = _uiState.value.copy(
                         status = FilesStatus.FAILED,
-                        errorMessage = "SFTP could not start on this connection."
+                        errorMessage = UiMessage.of(R.string.files_error_sftp_start)
                     )
                     return@launch
                 }
@@ -307,18 +311,18 @@ class FilesViewModel(
             } catch (e: SshTransportException) {
                 _uiState.value = _uiState.value.copy(
                     status = FilesStatus.FAILED,
-                    errorMessage = e.userFacingMessage()
+                    errorMessage = UiMessage.ofText(e.userFacingMessage())
                 )
             } catch (e: SftpException) {
                 disconnect()
                 _uiState.value = _uiState.value.copy(
                     status = FilesStatus.FAILED,
-                    errorMessage = e.error.userMessage
+                    errorMessage = UiMessage.ofText(e.error.userMessage)
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     status = FilesStatus.FAILED,
-                    errorMessage = "Connection failed. Please try again."
+                    errorMessage = UiMessage.of(R.string.vm_error_connection_failed)
                 )
             } finally {
                 credentialBytes?.wipe()
@@ -453,9 +457,9 @@ class FilesViewModel(
                 _uiState.value = _uiState.value.copy(errorMessage = null)
                 publishEntries()
             } catch (e: SftpException) {
-                _uiState.value = _uiState.value.copy(errorMessage = e.error.userMessage)
+                _uiState.value = _uiState.value.copy(errorMessage = UiMessage.ofText(e.error.userMessage))
             } catch (_: Exception) {
-                _uiState.value = _uiState.value.copy(errorMessage = "Could not list this directory.")
+                _uiState.value = _uiState.value.copy(errorMessage = UiMessage.of(R.string.files_error_list_directory))
             }
         }
     }
@@ -481,12 +485,12 @@ class FilesViewModel(
                 if (_uiState.value.currentPath != "/") {
                     _uiState.value = _uiState.value.copy(
                         currentPath = "/",
-                        infoMessage = "Working directory not available — started at root."
+                        infoMessage = UiMessage.of(R.string.files_info_workdir_fallback)
                     )
                     refresh()
                 } else {
                     _uiState.value = _uiState.value.copy(
-                        errorMessage = "Could not list this directory."
+                        errorMessage = UiMessage.of(R.string.files_error_list_directory)
                     )
                 }
             }
@@ -507,7 +511,7 @@ class FilesViewModel(
 
     fun mkdir(name: String) {
         if (!RemotePath.isValidName(name)) {
-            _uiState.value = _uiState.value.copy(errorMessage = "Invalid directory name.")
+            _uiState.value = _uiState.value.copy(errorMessage = UiMessage.of(R.string.files_error_invalid_directory_name))
             return
         }
         val manager = sftpManager ?: return
@@ -516,14 +520,14 @@ class FilesViewModel(
                 withContext(Dispatchers.IO) { manager.mkdir(_uiState.value.currentPath, name) }
                 refresh()
             } catch (e: SftpException) {
-                _uiState.value = _uiState.value.copy(errorMessage = e.error.userMessage)
+                _uiState.value = _uiState.value.copy(errorMessage = UiMessage.ofText(e.error.userMessage))
             }
         }
     }
 
     fun rename(entry: RemoteEntry, newName: String) {
         if (!RemotePath.isValidName(newName)) {
-            _uiState.value = _uiState.value.copy(errorMessage = "Invalid name.")
+            _uiState.value = _uiState.value.copy(errorMessage = UiMessage.of(R.string.files_error_invalid_name))
             return
         }
         val manager = sftpManager ?: return
@@ -532,7 +536,7 @@ class FilesViewModel(
                 withContext(Dispatchers.IO) { manager.rename(entry.path, newName) }
                 refresh()
             } catch (e: SftpException) {
-                _uiState.value = _uiState.value.copy(errorMessage = e.error.userMessage)
+                _uiState.value = _uiState.value.copy(errorMessage = UiMessage.ofText(e.error.userMessage))
             }
         }
     }
@@ -546,9 +550,12 @@ class FilesViewModel(
             } catch (e: SftpException) {
                 _uiState.value = _uiState.value.copy(
                     errorMessage = if (entry.isDirectory) {
-                        e.error.userMessage + " Empty the directory first — recursive delete is not supported."
+                        UiMessage.of(
+                            R.string.files_error_delete_not_empty,
+                            e.error.userMessage
+                        )
                     } else {
-                        e.error.userMessage
+                        UiMessage.ofText(e.error.userMessage)
                     }
                 )
             }
@@ -577,9 +584,12 @@ class FilesViewModel(
             clearSelection()
             _uiState.value = _uiState.value.copy(
                 infoMessage = if (failed == 0) {
-                    "Deleted ${targets.size} item(s)."
+                    UiMessage.of(R.string.files_info_deleted, targets.size)
                 } else {
-                    "Deleted ${targets.size - failed} item(s); $failed could not be deleted."
+                    UiMessage.of(
+                        R.string.files_info_deleted_partial,
+                        targets.size - failed, failed
+                    )
                 }
             )
             refresh()
@@ -594,7 +604,7 @@ class FilesViewModel(
         val treeUriString = settings?.localDirectoryUri?.takeIf { it.isNotBlank() }
         if (treeUriString == null) {
             _uiState.value = _uiState.value.copy(
-                errorMessage = "No local folder is set for this host."
+                errorMessage = UiMessage.of(R.string.files_error_no_local_folder)
             )
             return null
         }
@@ -674,7 +684,7 @@ class FilesViewModel(
             }
             clearSelection()
             _uiState.value = _uiState.value.copy(
-                infoMessage = "Queued $queued download(s)."
+                infoMessage = UiMessage.of(R.string.files_info_queued_downloads, queued)
             )
         }
     }
@@ -758,8 +768,13 @@ class FilesViewModel(
             queued++
         }
         _uiState.value = _uiState.value.copy(
-            infoMessage = "Queued $queued upload(s)" +
-                if (skipped > 0) "; $skipped skipped (name already exists)." else "."
+            infoMessage = if (skipped > 0) {
+                UiMessage.of(
+                    R.string.files_info_queued_uploads_skipped, queued, skipped
+                )
+            } else {
+                UiMessage.of(R.string.files_info_queued_uploads, queued)
+            }
         )
     }
 
@@ -774,7 +789,7 @@ class FilesViewModel(
                 null
             } ?: run {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = "Could not read the selected folder."
+                    errorMessage = UiMessage.of(R.string.files_error_read_folder)
                 )
                 return@launch
             }
@@ -823,7 +838,7 @@ class FilesViewModel(
                 queued++
             }
             _uiState.value = _uiState.value.copy(
-                infoMessage = "Queued $queued upload(s) from the folder."
+                infoMessage = UiMessage.of(R.string.files_info_queued_uploads_folder, queued)
             )
         }
     }
@@ -917,7 +932,7 @@ class FilesViewModel(
         if (sftpManager == null) return
         val remotePath = RemotePath.join(_uiState.value.currentPath, remoteName)
         if (remotePath == null) {
-            _uiState.update { it.copy(errorMessage = "That file name cannot be used on the server.") }
+            _uiState.update { it.copy(errorMessage = UiMessage.of(R.string.files_error_name_unusable_on_server)) }
             return
         }
         enqueue(
@@ -940,7 +955,7 @@ class FilesViewModel(
             val input = withContext(Dispatchers.IO) {
                 contentResolver.openInputStream(task.uri)
             } ?: run {
-                _uiState.value = _uiState.value.copy(errorMessage = "Could not open the selected file.")
+                _uiState.value = _uiState.value.copy(errorMessage = UiMessage.of(R.string.files_error_open_selected_file))
                 return
             }
             val total = queryDisplayNameAndSize(task.uri).second
@@ -990,19 +1005,19 @@ class FilesViewModel(
                 )
                 _uiState.value = _uiState.value.copy(
                     transfer = null,
-                    errorMessage = e.error.userMessage,
+                    errorMessage = UiMessage.ofText(e.error.userMessage),
                     resumableUploadName = task.remoteName
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
                     transfer = null,
-                    errorMessage = e.error.userMessage
+                    errorMessage = UiMessage.ofText(e.error.userMessage)
                 )
             }
         } catch (_: Exception) {
             _uiState.value = _uiState.value.copy(
                 transfer = null,
-                errorMessage = "Upload failed. Please try again."
+                errorMessage = UiMessage.of(R.string.files_error_upload_failed)
             )
         }
     }
@@ -1093,7 +1108,7 @@ class FilesViewModel(
         // The name comes from the server: refuse anything that is not a
         // plain file name before it becomes a local document name.
         if (!RemotePath.isValidName(entry.name) || com.pishi.termbridge.domain.ControlChars.containsControl(entry.name)) {
-            _uiState.update { it.copy(errorMessage = "This file name cannot be saved locally.") }
+            _uiState.update { it.copy(errorMessage = UiMessage.of(R.string.files_error_name_unsavable_locally)) }
             return
         }
         viewModelScope.launch {
@@ -1101,7 +1116,7 @@ class FilesViewModel(
             val treeUriString = settings?.localDirectoryUri?.takeIf { it.isNotBlank() }
             if (treeUriString == null) {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = "No local folder is set for this host."
+                    errorMessage = UiMessage.of(R.string.files_error_no_local_folder)
                 )
                 return@launch
             }
@@ -1124,9 +1139,7 @@ class FilesViewModel(
             }
             if (docUri == null) {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = "Could not write to the host local folder. " +
-                        "Check the folder in the host environment settings, " +
-                        "or download with the file picker instead."
+                    errorMessage = UiMessage.of(R.string.files_error_write_local_folder)
                 )
                 return@launch
             }
@@ -1159,7 +1172,7 @@ class FilesViewModel(
                     contentResolver.openOutputStream(uri)
                 }
             } ?: run {
-                _uiState.value = _uiState.value.copy(errorMessage = "Could not open the destination file.")
+                _uiState.value = _uiState.value.copy(errorMessage = UiMessage.of(R.string.files_error_open_destination))
                 return
             }
             withContext(Dispatchers.IO) {
@@ -1196,7 +1209,7 @@ class FilesViewModel(
             if (canResume) {
                 _uiState.value = _uiState.value.copy(
                     transfer = null,
-                    errorMessage = e.error.userMessage,
+                    errorMessage = UiMessage.ofText(e.error.userMessage),
                     resumableDownload = ResumableDownload(
                         entryName = entry.name,
                         entryPath = entry.path,
@@ -1212,7 +1225,7 @@ class FilesViewModel(
                 }
                 _uiState.value = _uiState.value.copy(
                     transfer = null,
-                    errorMessage = e.error.userMessage
+                    errorMessage = UiMessage.ofText(e.error.userMessage)
                 )
             }
         } catch (_: Exception) {
@@ -1222,7 +1235,7 @@ class FilesViewModel(
             }
             _uiState.value = _uiState.value.copy(
                 transfer = null,
-                errorMessage = "Download failed. Please try again."
+                errorMessage = UiMessage.of(R.string.files_error_download_failed)
             )
         } finally {
             try {

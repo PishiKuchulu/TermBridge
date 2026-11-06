@@ -1,5 +1,6 @@
 package com.pishi.termbridge.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -15,12 +16,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
@@ -32,6 +36,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -63,6 +68,43 @@ fun RemoteDesktopScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsState()
+
+    // Audit #3 (A-16, warning half): Back while a VNC session
+    // is connected asks first, instead of leaving the live
+    // session screen without a word. Only the dialog's Leave
+    // lets the press through (the handler disables itself,
+    // then the press is re-dispatched). The ViewModel's scope
+    // and its onCleared teardown are unchanged.
+    var showLeaveConfirm by remember { mutableStateOf(false) }
+    var leaveConfirmed by remember { mutableStateOf(false) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    BackHandler(enabled = state.status == DesktopStatus.CONNECTED && !leaveConfirmed) {
+        showLeaveConfirm = true
+    }
+    LaunchedEffect(leaveConfirmed) {
+        if (leaveConfirmed) backDispatcher?.onBackPressed()
+    }
+    if (showLeaveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLeaveConfirm = false },
+            title = { Text(stringResource(R.string.desktop_leave_title)) },
+            text = { Text(stringResource(R.string.desktop_leave_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLeaveConfirm = false
+                        leaveConfirmed = true
+                    }
+                ) { Text(stringResource(R.string.action_leave)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
     if (state.status == DesktopStatus.CONNECTED) {
         DesktopSession(viewModel, modifier)
     } else {
@@ -466,17 +508,17 @@ private fun DesktopSession(viewModel: RemoteDesktopViewModel, modifier: Modifier
             androidx.compose.material3.FilterChip(
                 selected = stickyCtrl,
                 onClick = { stickyCtrl = !stickyCtrl },
-                label = { Text("Ctrl") }
+                label = { Text(stringResource(R.string.desktop_key_ctrl)) }
             )
             androidx.compose.material3.FilterChip(
                 selected = stickyAlt,
                 onClick = { stickyAlt = !stickyAlt },
-                label = { Text("Alt") }
+                label = { Text(stringResource(R.string.desktop_key_alt)) }
             )
             androidx.compose.material3.FilterChip(
                 selected = stickyShift,
                 onClick = { stickyShift = !stickyShift },
-                label = { Text("Shift") }
+                label = { Text(stringResource(R.string.desktop_key_shift)) }
             )
             if (zoom > 1f) {
                 OutlinedButton(
@@ -501,10 +543,18 @@ private fun DesktopSession(viewModel: RemoteDesktopViewModel, modifier: Modifier
             KeyButton(R.string.desktop_key_delete) { keyTap(RfbKeys.DELETE) }
             KeyButton(R.string.desktop_key_win) { keyTap(RfbKeys.SUPER_L) }
             KeyButton(R.string.desktop_key_ctrl_alt_del) { viewModel.ctrlAltDelete() }
-            OutlinedButton(onClick = { keyTap(RfbKeys.LEFT) }) { Text("←") }
-            OutlinedButton(onClick = { keyTap(RfbKeys.UP) }) { Text("↑") }
-            OutlinedButton(onClick = { keyTap(RfbKeys.DOWN) }) { Text("↓") }
-            OutlinedButton(onClick = { keyTap(RfbKeys.RIGHT) }) { Text("→") }
+            OutlinedButton(onClick = { keyTap(RfbKeys.LEFT) }) {
+                Text(stringResource(R.string.desktop_key_arrow_left))
+            }
+            OutlinedButton(onClick = { keyTap(RfbKeys.UP) }) {
+                Text(stringResource(R.string.desktop_key_arrow_up))
+            }
+            OutlinedButton(onClick = { keyTap(RfbKeys.DOWN) }) {
+                Text(stringResource(R.string.desktop_key_arrow_down))
+            }
+            OutlinedButton(onClick = { keyTap(RfbKeys.RIGHT) }) {
+                Text(stringResource(R.string.desktop_key_arrow_right))
+            }
             // Item F-03b: middle click + wheel, at the frame centre.
             KeyButton(R.string.desktop_key_middle) {
                 frame?.let { f ->

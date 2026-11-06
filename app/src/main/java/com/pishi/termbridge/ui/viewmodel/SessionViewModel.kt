@@ -3,6 +3,7 @@ package com.pishi.termbridge.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.pishi.termbridge.R
 import com.pishi.termbridge.data.CommandRepository
 import com.pishi.termbridge.data.HostEnvironmentRepository
 import com.pishi.termbridge.data.HostRepository
@@ -33,6 +34,7 @@ import com.pishi.termbridge.transport.SshConnectionRequest
 import com.pishi.termbridge.transport.SshTransport
 import com.pishi.termbridge.transport.SshTransportException
 import com.pishi.termbridge.transport.SshjConnection
+import com.pishi.termbridge.ui.UiMessage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +64,9 @@ data class SessionUiState(
     val selectedHostId: Long? = null,
     val status: SessionStatus = SessionStatus.IDLE,
     val connectedHost: HostProfile? = null,
-    val errorMessage: String? = null,
+    // Audit #3 (A-09): UiMessage (resource id + args, or
+    // ready-made lower-layer text); the screen resolves.
+    val errorMessage: UiMessage? = null,
     val pendingTrust: PendingTrust? = null
 )
 
@@ -111,6 +115,20 @@ data class EnvStatus(
     val fallbackNames: List<String> = emptyList()
 )
 
+/**
+ * Audit #3 (A-13): shell-history lines that were fetched and
+ * admitted but are NOT recorded yet. The screen shows the count
+ * and a preview; only an explicit confirm records [lines].
+ */
+data class PendingHistoryImport(
+    /** How many lines passed parsing + admission. */
+    val totalAccepted: Int,
+    /** The first lines, for the preview dialog. */
+    val preview: List<String>,
+    /** Every admitted line; recorded only on confirm. */
+    val lines: List<String>
+)
+
 class SessionViewModel(
     private val repository: HostRepository,
     private val commandRepository: CommandRepository,
@@ -134,8 +152,14 @@ class SessionViewModel(
     private val inputTracker = com.pishi.termbridge.domain.InputLineTracker()
     private val _suggestions = MutableStateFlow<List<String>>(emptyList())
     val suggestions: StateFlow<List<String>> = _suggestions.asStateFlow()
-    private val _historyImportMessage = MutableStateFlow<String?>(null)
-    val historyImportMessage: StateFlow<String?> = _historyImportMessage.asStateFlow()
+    private val _historyImportMessage = MutableStateFlow<UiMessage?>(null)
+    val historyImportMessage: StateFlow<UiMessage?> = _historyImportMessage.asStateFlow()
+
+    // Audit #3 (A-13): fetched history awaiting the user's
+    // preview confirmation; null when no import is pending.
+    private val _pendingHistoryImport = MutableStateFlow<PendingHistoryImport?>(null)
+    val pendingHistoryImport: StateFlow<PendingHistoryImport?> =
+        _pendingHistoryImport.asStateFlow()
 
     /** Item T-11: the history files, read over the exec
      *  channel only. Missing files are silent (2>/dev/null). */
@@ -143,10 +167,21 @@ class SessionViewModel(
         "cat ~/.bash_history ~/.zsh_history " +
             "~/.local/share/fish/fish_history 2>/dev/null | tail -n 4000"
 
+    /** Audit #3 (A-13): how many admitted lines the import
+     *  preview dialog shows before recording. */
+    private val HISTORY_IMPORT_PREVIEW_LINES = 10
+
     // Item T-16: the detected remote OS (display text), or
     // null when not probed / not detectable.
-    private val _detectedOs = MutableStateFlow<String?>(null)
-    val detectedOs: StateFlow<String?> = _detectedOs.asStateFlow()
+    private val _detectedOs = MutableStateFlow<UiMessage?>(null)
+    val detectedOs: StateFlow<UiMessage?> = _detectedOs.asStateFlow()
+
+    // Audit #3 (A-20): true when the probed OS family clearly
+    // contradicts the connected host's declared shell family —
+    // the screen warns next to the OS line, because button
+    // quoting follows the DECLARED shell, not the probed OS.
+    private val _shellMismatchWarning = MutableStateFlow(false)
+    val shellMismatchWarning: StateFlow<Boolean> = _shellMismatchWarning.asStateFlow()
 
     /**
      * Item T-16: probes the remote OS over the exec channel —
@@ -172,7 +207,14 @@ class SessionViewModel(
             } catch (_: Exception) {
                 null
             }
-            _detectedOs.value = detected?.display ?: "Unknown OS"
+            _detectedOs.value = detected?.let { UiMessage.ofText(it.display) }
+                ?: UiMessage.of(R.string.session_unknown_os)
+            // Audit #3 (A-20): compare families only — a failed
+            // probe (null) carries no signal and never warns.
+            _shellMismatchWarning.value =
+                com.pishi.termbridge.domain.ShellMismatch.isMismatch(
+                    detected, _connectedShell.value
+                )
         }
     }
 
@@ -229,27 +271,54 @@ class SessionViewModel(
      * interactive shell), after the user's explicit consent in
      * the UI. Lines pass ShellHistoryImport + CommandAdmission,
      * so secret-looking lines never reach the store.
+     *
+     * Audit #3 (A-13): fetching no longer records. The admitted
+     * lines wait in [pendingHistoryImport] while the screen
+     * shows the count and a preview; [confirmHistoryImport]
+     * records them, [dismissHistoryImport] drops them.
      */
     fun importShellHistory() {
-        val store = commandHistoryStore ?: return
+        commandHistoryStore ?: return
         val channel = connection as? com.pishi.termbridge.transport.SshExecChannel
         if (channel == null) {
-            _historyImportMessage.value = "History import needs a live session."
+            _historyImportMessage.value =
+                UiMessage.of(R.string.history_import_needs_session)
             return
         }
-        _historyImportMessage.value = "Importing shell history…"
+        _historyImportMessage.value =
+            UiMessage.of(R.string.history_import_running)
         viewModelScope.launch {
             try {
                 val raw = channel.execOnce(HISTORY_IMPORT_COMMAND, 15_000)
                 val lines = com.pishi.termbridge.domain.ShellHistoryImport.parse(raw)
-                val added = store.recordImported(lines)
-                _historyImportMessage.value =
-                    "Imported $added new commands (${lines.size} usable lines read)."
-                refreshSuggestions()
+                _historyImportMessage.value = null
+                _pendingHistoryImport.value = PendingHistoryImport(
+                    totalAccepted = lines.size,
+                    preview = lines.take(HISTORY_IMPORT_PREVIEW_LINES),
+                    lines = lines
+                )
             } catch (_: Exception) {
-                _historyImportMessage.value = "Shell history import failed."
+                _historyImportMessage.value =
+                    UiMessage.of(R.string.history_import_failed)
             }
         }
+    }
+
+    /** Audit #3 (A-13): record a previewed import for real. */
+    fun confirmHistoryImport() {
+        val pending = _pendingHistoryImport.value ?: return
+        val store = commandHistoryStore ?: return
+        _pendingHistoryImport.value = null
+        val added = store.recordImported(pending.lines)
+        _historyImportMessage.value = UiMessage.of(
+            R.string.history_import_done, added, pending.lines.size
+        )
+        refreshSuggestions()
+    }
+
+    /** Audit #3 (A-13): drop a previewed import unrecorded. */
+    fun dismissHistoryImport() {
+        _pendingHistoryImport.value = null
     }
 
     // Item T-03: transcript capture state (all null/0 = off).
@@ -299,6 +368,10 @@ class SessionViewModel(
     private var connection: SshConnection? = null
     private var terminalSession: TerminalSession? = null
     private var connectJob: Job? = null
+    // Audit #3 (A-21): written on the sshj reader thread (inside
+    // awaitDecision) and completed from the main thread — the
+    // reference itself must be safely published across threads.
+    @Volatile
     private var decisionDeferred: CompletableDeferred<Boolean>? = null
 
     // Prompt 08: command buttons for the connected host, and the
@@ -415,7 +488,7 @@ class SessionViewModel(
                 if (profile == null) {
                     _uiState.value = _uiState.value.copy(
                         status = SessionStatus.FAILED,
-                        errorMessage = "Host not found."
+                        errorMessage = UiMessage.of(R.string.vm_error_host_not_found)
                     )
                     return@launch
                 }
@@ -423,7 +496,7 @@ class SessionViewModel(
                 if (credentialBytes == null) {
                     _uiState.value = _uiState.value.copy(
                         status = SessionStatus.FAILED,
-                        errorMessage = "No credential stored for this host. Edit the host and add one."
+                        errorMessage = UiMessage.of(R.string.vm_error_no_credential)
                     )
                     return@launch
                 }
@@ -445,7 +518,7 @@ class SessionViewModel(
                 _uiState.update {
                     it.copy(
                         status = SessionStatus.FAILED,
-                        errorMessage = "Connection failed. Please try again."
+                        errorMessage = UiMessage.of(R.string.vm_error_connection_failed)
                     )
                 }
             } finally {
@@ -458,6 +531,11 @@ class SessionViewModel(
     /** Cancel any attempt, close any live session, show CONNECTING. */
     private fun prepareConnect() {
         connectJob?.cancel()
+        // Audit #3 (A-04): cancelling the job cannot interrupt a
+        // blocking sshj handshake, so tear down the previous
+        // attempt's socket explicitly — BEFORE the new attempt
+        // registers its own client, so only the stale one dies.
+        transport.closeInFlight()
         // Review #2 F-05: a reconnect (or a retry after a failure)
         // must not orphan the previous authenticated transport.
         closeLiveSession()
@@ -588,7 +666,7 @@ class SessionViewModel(
                 connection = null
                 _uiState.value = _uiState.value.copy(
                     status = SessionStatus.FAILED,
-                    errorMessage = "Terminal could not start on this connection."
+                    errorMessage = UiMessage.of(R.string.session_error_terminal_start)
                 )
                 return
             }
@@ -612,9 +690,9 @@ class SessionViewModel(
                         it.copy(
                             status = SessionStatus.FAILED,
                             errorMessage = if (error == null) {
-                                "Shell closed by the server."
+                                UiMessage.of(R.string.session_shell_closed)
                             } else {
-                                "Connection lost."
+                                UiMessage.of(R.string.session_connection_lost)
                             }
                         )
                     } else {
@@ -798,7 +876,7 @@ class SessionViewModel(
             _uiState.update {
                 it.copy(
                     status = SessionStatus.FAILED,
-                    errorMessage = e.userFacingMessage()
+                    errorMessage = UiMessage.ofText(e.userFacingMessage())
                 )
             }
         } catch (e: Exception) {
@@ -815,7 +893,7 @@ class SessionViewModel(
             _uiState.update {
                 it.copy(
                     status = SessionStatus.FAILED,
-                    errorMessage = "Connection failed. Please try again."
+                    errorMessage = UiMessage.of(R.string.vm_error_connection_failed)
                 )
             }
         } finally {
@@ -851,6 +929,9 @@ class SessionViewModel(
     fun cancel() {
         decisionDeferred?.complete(false)
         connectJob?.cancel()
+        // Audit #3 (A-04): the job cancel alone leaves a blocking
+        // handshake socket open until its timeout; close it now.
+        transport.closeInFlight()
         disconnect()
         _uiState.value = _uiState.value.copy(status = SessionStatus.IDLE, errorMessage = null)
     }
@@ -900,7 +981,10 @@ class SessionViewModel(
         inputTracker.reset()
         _suggestions.value = emptyList()
         _historyImportMessage.value = null
+        _pendingHistoryImport.value = null
+        _pendingShakeEffect.value = null
         _detectedOs.value = null
+        _shellMismatchWarning.value = false
         if (_uiState.value.status == SessionStatus.CONNECTED && sessionStartedAt > 0L) {
             logEntry(
                 sessionHostName, com.pishi.termbridge.domain.ConnectionOutcome.CLOSED,
@@ -909,6 +993,11 @@ class SessionViewModel(
             sessionStartedAt = 0L
         }
         connectJob?.cancel()
+        // Audit #3 (A-04): if disconnect is tapped mid-handshake,
+        // the in-flight socket is closed too, not just the job.
+        // (An established connection is not in the registry; it
+        // is closed through the normal path below.)
+        transport.closeInFlight()
         stopSequence()
         // A latched modifier must never leak into the next session.
         keyLatch.clear()
@@ -1226,6 +1315,18 @@ class SessionViewModel(
     private val _scrollRequest = MutableStateFlow(0)
     val scrollRequest: StateFlow<Int> = _scrollRequest.asStateFlow()
 
+    /**
+     * Audit #3 (A-10): a shake effect (disconnect / clear
+     * screen) that fired and is WAITING for the user's
+     * confirmation in the dialog — it has not acted yet. Null
+     * when no shake confirmation is pending.
+     */
+    private val _pendingShakeEffect =
+        MutableStateFlow<com.pishi.termbridge.domain.ShakeEffect?>(null)
+    val pendingShakeEffect:
+        StateFlow<com.pishi.termbridge.domain.ShakeEffect?> =
+        _pendingShakeEffect.asStateFlow()
+
     fun onVolumeKey(
         key: com.pishi.termbridge.domain.VolumeKey,
         isRepeat: Boolean = false
@@ -1274,18 +1375,39 @@ class SessionViewModel(
             settings.value.shakeAction
         )
         return when (
-            com.pishi.termbridge.domain.DeviceActionMapping.shakeEffect(action)
+            val effect = com.pishi.termbridge.domain.DeviceActionMapping.shakeEffect(action)
         ) {
             com.pishi.termbridge.domain.ShakeEffect.None -> false
-            com.pishi.termbridge.domain.ShakeEffect.ClearScreen -> {
-                terminalSession?.clearLocal()
-                true
-            }
+            // Audit #3 (A-10): a shake is easy to trigger by
+            // accident and both effects are destructive (a lost
+            // session, a wiped screen) — the shake now only ASKS.
+            // The screen shows a confirmation dialog and the
+            // effect runs solely from confirmShakeEffect().
+            com.pishi.termbridge.domain.ShakeEffect.ClearScreen,
             com.pishi.termbridge.domain.ShakeEffect.Disconnect -> {
-                disconnect()
+                _pendingShakeEffect.value = effect
                 true
             }
         }
+    }
+
+    /** Audit #3 (A-10): run the shake effect the user confirmed. */
+    fun confirmShakeEffect() {
+        val effect = _pendingShakeEffect.value
+        _pendingShakeEffect.value = null
+        when (effect) {
+            com.pishi.termbridge.domain.ShakeEffect.Disconnect -> disconnect()
+            com.pishi.termbridge.domain.ShakeEffect.ClearScreen ->
+                terminalSession?.clearLocal()
+            else -> {
+                // Nothing pending (or None): nothing to run.
+            }
+        }
+    }
+
+    /** Audit #3 (A-10): drop a pending shake effect unacted. */
+    fun dismissShakeEffect() {
+        _pendingShakeEffect.value = null
     }
 
     /**

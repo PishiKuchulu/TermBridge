@@ -94,6 +94,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -104,6 +107,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pishi.termbridge.R
+import com.pishi.termbridge.ui.resolve
 import com.pishi.termbridge.domain.AppSettings
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.CommandMode
@@ -167,6 +171,11 @@ fun SessionScreen(
     val connectedShellConfirmed by viewModel.connectedShellConfirmed.collectAsState()
     val activeSequence by viewModel.activeSequence.collectAsState()
     val envStatus by viewModel.envStatus.collectAsState()
+    // Audit #3 (A-10 / A-13 / A-20): shake confirmation, history
+    // import preview, and the shell-family mismatch warning.
+    val pendingShakeEffect by viewModel.pendingShakeEffect.collectAsState()
+    val pendingHistoryImport by viewModel.pendingHistoryImport.collectAsState()
+    val shellMismatchWarning by viewModel.shellMismatchWarning.collectAsState()
     var passphrase by remember { mutableStateOf("") }
 
     // Immersive terminal (item Q-01): expanded mode fills the
@@ -306,9 +315,22 @@ fun SessionScreen(
                     Spacer(modifier = Modifier.height(Spacing.small))
                     Text(
                         text = stringResource(
-                            R.string.session_detected_os, detectedOs!!
+                            R.string.session_detected_os, detectedOs!!.resolve()
                         ),
                         style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                // Audit #3 (A-20): the probed OS family clearly
+                // contradicts the declared shell family — button
+                // quoting follows the declared shell, so warn.
+                if (shellMismatchWarning) {
+                    Spacer(modifier = Modifier.height(Spacing.small))
+                    Text(
+                        text = stringResource(
+                            R.string.session_shell_mismatch_warning
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
                 Spacer(modifier = Modifier.height(Spacing.small))
@@ -328,7 +350,7 @@ fun SessionScreen(
                     if (importMessage != null) {
                         Spacer(modifier = Modifier.height(Spacing.small))
                         Text(
-                            text = importMessage!!,
+                            text = importMessage!!.resolve(),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -546,6 +568,7 @@ fun SessionScreen(
                             placeholder = { Text(stringResource(R.string.session_passphrase_hint)) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -562,7 +585,7 @@ fun SessionScreen(
                 )
                 uiState.errorMessage?.let {
                     Spacer(modifier = Modifier.height(Spacing.small))
-                    Text(text = it, color = MaterialTheme.colorScheme.error)
+                    Text(text = it.resolve(), color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -586,6 +609,84 @@ fun SessionScreen(
             dismissButton = {
                 TextButton(
                     onClick = { showHistoryImportConsent = false }
+                ) { Text(stringResource(R.string.action_cancel)) }
+            }
+        )
+    }
+    // Audit #3 (A-13): the fetched lines are previewed — count
+    // plus the first lines — and recorded ONLY on this confirm.
+    // Dismissing (or tapping outside) drops them unrecorded.
+    val importPreview = pendingHistoryImport
+    if (importPreview != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissHistoryImport() },
+            title = { Text(stringResource(R.string.history_import_preview_title)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(
+                            R.string.history_import_preview_body,
+                            importPreview.totalAccepted
+                        )
+                    )
+                    importPreview.preview.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.confirmHistoryImport() }
+                ) { Text(stringResource(R.string.history_import_confirm)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.dismissHistoryImport() }
+                ) { Text(stringResource(R.string.action_cancel)) }
+            }
+        )
+    }
+    // Audit #3 (A-10): a shake only ASKS. The destructive effect
+    // (disconnect / clear screen) runs solely on this confirm.
+    val pendingShake = pendingShakeEffect
+    if (pendingShake != null) {
+        val shakeIsDisconnect =
+            pendingShake == com.pishi.termbridge.domain.ShakeEffect.Disconnect
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissShakeEffect() },
+            title = {
+                Text(
+                    stringResource(
+                        if (shakeIsDisconnect) {
+                            R.string.shake_confirm_disconnect_title
+                        } else {
+                            R.string.shake_confirm_clear_title
+                        }
+                    )
+                )
+            },
+            text = {
+                Text(
+                    stringResource(
+                        if (shakeIsDisconnect) {
+                            R.string.shake_confirm_disconnect_body
+                        } else {
+                            R.string.shake_confirm_clear_body
+                        }
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.confirmShakeEffect() }
+                ) { Text(stringResource(R.string.action_confirm)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.dismissShakeEffect() }
                 ) { Text(stringResource(R.string.action_cancel)) }
             }
         )
@@ -764,6 +865,19 @@ private fun TerminalView(
     var pendingPaste by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
     val clipboardManager = LocalClipboardManager.current
+    // Audit #3 (A-25): copies OUT of the terminal go through
+    // the platform clipboard so they can carry the sensitive
+    // flag (Compose's LocalClipboardManager cannot attach it);
+    // terminal output routinely contains secrets the user
+    // selected, and the flag keeps it out of clipboard history
+    // and preview surfaces on Android 13+.
+    val terminalContext = LocalContext.current
+    val platformClipboard = remember(terminalContext) {
+        val service = terminalContext.getSystemService(
+            android.content.Context.CLIPBOARD_SERVICE
+        )
+        service as android.content.ClipboardManager
+    }
     val uriHandler = LocalUriHandler.current
 
     // Canvas renderer state (item Q-03). The scroll model keeps
@@ -831,11 +945,19 @@ private fun TerminalView(
                         val plainLines = snapshot.lines.map { line ->
                             line.joinToString("") { cell -> cell.char.toString() }
                         }
-                        clipboardManager.setText(
-                            AnnotatedString(
-                                TerminalViewport.extractText(plainLines, activeSelection)
-                            )
+                        val selectedText = TerminalViewport.extractText(
+                            plainLines, activeSelection
                         )
+                        val clip = android.content.ClipData.newPlainText(
+                            null, selectedText
+                        )
+                        clip.description.extras = android.os.PersistableBundle().apply {
+                            putBoolean(
+                                android.content.ClipDescription.EXTRA_IS_SENSITIVE,
+                                true
+                            )
+                        }
+                        platformClipboard.setPrimaryClip(clip)
                         selection = null
                     }
                 )
@@ -936,9 +1058,23 @@ private fun TerminalView(
             var selectionAnchor by remember {
                 mutableStateOf<TerminalViewport.CellPos?>(null)
             }
+            // Audit #3 (A-01): the Canvas draws pixels only, so
+            // without semantics a screen reader meets an empty
+            // surface. Expose a description plus the most recent
+            // lines of output as the node's text — the join is
+            // bounded to 10 lines and runs only when the snapshot
+            // (the drawn content) changes. Drawing is untouched.
+            val terminalDescription = stringResource(R.string.terminal_output_description)
+            val recentTerminalText = snapshot.lines.takeLast(10).joinToString("\n") { line ->
+                line.joinToString("") { cell -> cell.char.toString() }.trimEnd()
+            }
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
+                    .semantics {
+                        contentDescription = terminalDescription
+                        text = AnnotatedString(recentTerminalText)
+                    }
                     .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()

@@ -58,6 +58,41 @@ import net.schmizz.sshj.transport.verification.HostKeyVerifier
  *   in reverse order.
  */
 class SshTransport(private val trustStore: HostKeyTrustStore) {
+
+    /**
+     * Audit #3 (A-04): SSH clients whose connect attempt is
+     * still in flight (created, handshake/auth not finished).
+     * The blocking sshj calls ignore coroutine cancellation, so
+     * without this registry a cancelled attempt's socket stayed
+     * open until the handshake timeout. Membership is strictly
+     * attempt-scoped: a client is added at creation and removed
+     * when its attempt returns or fails, so an ESTABLISHED
+     * connection is never in here (it is closed through the
+     * normal SshConnection path instead).
+     */
+    private val inFlightClients =
+        java.util.Collections.synchronizedSet(mutableSetOf<SSHClient>())
+
+    /**
+     * Audit #3 (A-04): tear down every in-flight attempt's
+     * socket, best-effort. Disconnecting a client that is blocked
+     * inside connect/auth makes that blocking call fail promptly,
+     * which is what lets a user cancel during CONNECTING actually
+     * free the socket. Safe to call at any time; catches
+     * everything so a teardown failure can never mask the
+     * caller's own state handling.
+     */
+    fun closeInFlight() {
+        val snapshot = synchronized(inFlightClients) { inFlightClients.toList() }
+        for (client in snapshot) {
+            try {
+                client.disconnect()
+            } catch (_: Exception) {
+                // Best-effort: teardown must not mask anything.
+            }
+        }
+    }
+
     suspend fun connect(
         request: SshConnectionRequest,
         decisionHandler: HostKeyDecisionHandler
@@ -65,6 +100,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
         val profile = request.profile
         val storedFingerprint = trustStore.getTrustedFingerprint(profile.endpoint)
         val client = SSHClient()
+        inFlightClients += client
         try {
             return withContext(Dispatchers.IO) {
                 if (request.proxy.kind == ProxyKind.SOCKS) {
@@ -105,6 +141,11 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
             }
             if (e is kotlinx.coroutines.CancellationException) throw e
             throw SshTransportException(SshErrorMapper.map(e), SshErrorMapper.diagnose(e))
+        } finally {
+            // Attempt finished (success or failure): the client
+            // is either an established connection now or already
+            // disconnected — either way it leaves the registry.
+            inFlightClients -= client
         }
     }
 
@@ -139,6 +180,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 for ((index, hop) in hops.withIndex()) {
                     val client = SSHClient()
                     clients += client
+                    inFlightClients += client
                     if (index == 0 && target.proxy.kind == ProxyKind.SOCKS) {
                         client.setSocketFactory(
                             SocksSocketFactory(target.proxy.proxyHost, target.proxy.proxyPort)
@@ -174,6 +216,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                 }
                 val targetClient = SSHClient()
                 clients += targetClient
+                inFlightClients += targetClient
                 val targetDirect = direct
                     ?: throw SshTransportException(
                         SshErrorMapper.map(
@@ -216,6 +259,10 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             if (e is SshTransportException) throw e
             throw SshTransportException(SshErrorMapper.map(e), SshErrorMapper.diagnose(e))
+        } finally {
+            // Attempt finished: every client of the chain leaves
+            // the in-flight registry (see connect()).
+            inFlightClients.removeAll(clients)
         }
     }
 

@@ -20,10 +20,12 @@ sshj = "0.40.0"
 # directly (security/KeyGeneration.kt). Relying on sshj's
 # transitive line does NOT put BC on the compile classpath in
 # the Gradle build (proven by CI run #62), even though the
-# local harness's dep cache ships the jars. Pinned to the
-# same 1.80.2 line the R-07 scan documented; the 1.85 upgrade
-# stays a separate owner decision.
-bouncycastle = "1.80.2"
+# local harness's dep cache ships the jars. Raised to 1.85
+# in the audit-#3 fix wave (A-19, was R-07): clears
+# GHSA-9pwp, GHSA-qp49 (bcprov) and GHSA-wg6q (bcpkix);
+# app/build.gradle.kts constrains the transitive bcpkix
+# line to the same version so it cannot stay behind.
+bouncycastle = "1.85"
 room = "2.6.1"
 ksp = "2.0.21-1.0.25"
 junit = "4.13.2"
@@ -40,6 +42,7 @@ androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = 
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 sshj = { group = "com.hierynomus", name = "sshj", version.ref = "sshj" }
 bouncycastle-bcprov = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-bcpkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncycastle" }
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }

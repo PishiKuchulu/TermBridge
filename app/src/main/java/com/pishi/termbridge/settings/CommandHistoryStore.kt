@@ -34,6 +34,7 @@ class CommandHistoryStore(context: Context) {
     val entries: StateFlow<List<HistoryEntry>> = _entries
 
     /** Records one command the user ran (admission inside). */
+    @Synchronized
     fun record(text: String, nowMs: Long = System.currentTimeMillis()) {
         val admitted = CommandAdmission.admit(text) ?: return
         mutate { list ->
@@ -48,6 +49,7 @@ class CommandHistoryStore(context: Context) {
     }
 
     /** Merges imported history lines; returns how many were new. */
+    @Synchronized
     fun recordImported(lines: List<String>, nowMs: Long = System.currentTimeMillis()): Int {
         var added = 0
         mutate { list ->
@@ -67,6 +69,12 @@ class CommandHistoryStore(context: Context) {
         return added
     }
 
+    /**
+     * Audit #3 (A-12): empties BOTH representations — the
+     * in-memory entries and the persisted preferences — so a
+     * cleared history cannot resurrect on the next load.
+     */
+    @Synchronized
     fun clear() {
         _entries.value = emptyList()
         prefs.edit().remove(KEY).apply()
@@ -79,6 +87,11 @@ class CommandHistoryStore(context: Context) {
             list.sortedByDescending { it.lastUsedMs }.take(MAX_ENTRIES)
         }
 
+    // Audit #3 (A-24): read-modify-write of _entries + prefs
+    // is atomic because every caller (record, recordImported)
+    // is @Synchronized on this store — the same pattern
+    // ConnectionLogStore uses. Two concurrent records can no
+    // longer lose one another's update.
     private inline fun mutate(transform: (List<HistoryEntry>) -> List<HistoryEntry>) {
         val next = transform(_entries.value)
         _entries.value = next

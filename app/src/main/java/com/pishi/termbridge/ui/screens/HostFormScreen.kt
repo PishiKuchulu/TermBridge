@@ -1,5 +1,6 @@
 package com.pishi.termbridge.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -21,13 +27,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AuthType
+import com.pishi.termbridge.ui.components.DiscardChangesDialog
 import com.pishi.termbridge.ui.components.PrimaryAction
 import com.pishi.termbridge.ui.theme.Spacing
 import com.pishi.termbridge.ui.viewmodel.HostFormViewModel
@@ -51,6 +63,31 @@ fun HostFormScreen(
     LaunchedEffect(saved) {
         if (saved) onSaved()
     }
+
+    // Audit #3 (A-17): Back with unsaved edits asks first;
+    // only the dialog's Discard lets the press through (the
+    // handler disables itself, then the press is re-dispatched).
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    var discardConfirmed by remember { mutableStateOf(false) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    BackHandler(enabled = viewModel.isDirty && !discardConfirmed) {
+        showDiscardConfirm = true
+    }
+    LaunchedEffect(discardConfirmed) {
+        if (discardConfirmed) backDispatcher?.onBackPressed()
+    }
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(
+            onDiscard = {
+                showDiscardConfirm = false
+                discardConfirmed = true
+            },
+            onKeepEditing = { showDiscardConfirm = false }
+        )
+    }
+    // Audit #3 (A-14): the pasted private key is masked until
+    // the user explicitly reveals it.
+    var keyVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -210,6 +247,7 @@ fun HostFormScreen(
                 placeholder = { Text(stringResource(R.string.field_password_hint)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 isError = viewModel.errors["credential"] != null,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -220,6 +258,25 @@ fun HostFormScreen(
                 label = { Text(stringResource(R.string.field_private_key)) },
                 placeholder = { Text(stringResource(R.string.field_private_key_hint)) },
                 minLines = 4,
+                visualTransformation = if (keyVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    IconButton(onClick = { keyVisible = !keyVisible }) {
+                        Icon(
+                            imageVector = if (keyVisible) {
+                                Icons.Filled.VisibilityOff
+                            } else {
+                                Icons.Filled.Visibility
+                            },
+                            contentDescription = stringResource(
+                                if (keyVisible) R.string.secret_hide else R.string.secret_show
+                            )
+                        )
+                    }
+                },
                 isError = viewModel.errors["credential"] != null,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -231,6 +288,7 @@ fun HostFormScreen(
                 placeholder = { Text(stringResource(R.string.field_passphrase_hint)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(Spacing.small))

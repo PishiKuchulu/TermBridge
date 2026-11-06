@@ -121,8 +121,8 @@ if [ "$SKIP_DEPS" = 0 ]; then
   fetch_jar "$MVN" org/jetbrains/kotlinx kotlinx-coroutines-test-jvm 1.8.1
   fetch_jar "$MVN" com/hierynomus sshj 0.40.0 a6a5533f6580e0418dfcacbb5396680186698585c325fa950c788e749f24d1e2
   fetch_jar "$MVN" com/hierynomus asn-one 0.6.0
-  fetch_jar "$MVN" org/bouncycastle bcprov-jdk18on 1.80
-  fetch_jar "$MVN" org/bouncycastle bcpkix-jdk18on 1.80
+  fetch_jar "$MVN" org/bouncycastle bcprov-jdk18on 1.85
+  fetch_jar "$MVN" org/bouncycastle bcpkix-jdk18on 1.85
   fetch_jar "$MVN" net/i2p/crypto eddsa 0.3.0
   fetch_jar "$MVN" org/slf4j slf4j-api 1.7.36
   fetch_jar "$MVN" junit junit 4.13.2
@@ -163,8 +163,8 @@ MAIN_CP="$(join_by : "$ANDROID_JAR" \
   "$DEPS/kotlinx-serialization-core-jvm-1.7.3.jar" \
   "$DEPS/sshj-0.40.0.jar" \
   "$DEPS/asn-one-0.6.0.jar" \
-  "$DEPS/bcprov-jdk18on-1.80.jar" \
-  "$DEPS/bcpkix-jdk18on-1.80.jar" \
+  "$DEPS/bcprov-jdk18on-1.85.jar" \
+  "$DEPS/bcpkix-jdk18on-1.85.jar" \
   "$DEPS/eddsa-0.3.0.jar" \
   "$DEPS/slf4j-api-1.7.36.jar" \
   "$DEPS/annotation-jvm-1.8.2.jar" \

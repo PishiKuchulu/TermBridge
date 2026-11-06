@@ -80,6 +80,68 @@ class HostFormViewModel(
     var useKeychain by mutableStateOf(false)
     var selectedKeychainEntryId by mutableStateOf<Long?>(null)
 
+    // Audit #3 (A-17): the values the form was loaded with (or
+    // the new-host defaults / prefill), so the screen can warn
+    // before Back throws edits away. Null while an edited host
+    // is still loading — the guard stays off until then.
+    private data class FormBaseline(
+        val name: String,
+        val hostname: String,
+        val portText: String,
+        val username: String,
+        val authType: AuthType,
+        val notes: String,
+        val tags: String,
+        val groupName: String,
+        val favorite: Boolean,
+        val secretSnapshot: String,
+        val keyPem: String,
+        val secretCharsSnapshot: String,
+        val useKeychain: Boolean,
+        val selectedKeychainEntryId: Long?
+    )
+
+    private var baseline: FormBaseline? = null
+
+    private fun captureBaseline() {
+        baseline = FormBaseline(
+            name = name,
+            hostname = hostname,
+            portText = portText,
+            username = username,
+            authType = authType,
+            notes = notes,
+            tags = tags,
+            groupName = groupName,
+            favorite = favorite,
+            secretSnapshot = password,
+            keyPem = keyPem,
+            secretCharsSnapshot = passphrase,
+            useKeychain = useKeychain,
+            selectedKeychainEntryId = selectedKeychainEntryId
+        )
+    }
+
+    /** True when any field differs from the loaded baseline. */
+    val isDirty: Boolean
+        get() {
+            val base = baseline ?: return false
+            return name != base.name ||
+                hostname != base.hostname ||
+                portText != base.portText ||
+                username != base.username ||
+                authType != base.authType ||
+                notes != base.notes ||
+                tags != base.tags ||
+                groupName != base.groupName ||
+                favorite != base.favorite ||
+                password != base.secretSnapshot ||
+                keyPem != base.keyPem ||
+                passphrase != base.secretCharsSnapshot ||
+                useKeychain != base.useKeychain ||
+                selectedKeychainEntryId != base.selectedKeychainEntryId
+        }
+
     init {
         if (hostId != null) {
             viewModelScope.launch {
@@ -100,7 +162,10 @@ class HostFormViewModel(
                     selectedKeychainEntryId = profile.keychainEntryId
                     wasLinked = true
                 }
+                captureBaseline()
             }
+        } else {
+            captureBaseline()
         }
     }
 
@@ -111,6 +176,8 @@ class HostFormViewModel(
         if (name.isBlank()) name = host
         portText = port.toString()
         if (!user.isNullOrBlank() && username.isBlank()) username = user
+        // A prefill is the starting point, not a user edit.
+        captureBaseline()
     }
 
     fun save() {

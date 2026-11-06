@@ -101,6 +101,17 @@ dependencies {
     // licence match the prompt-01 record (13 May 2025 sources).
     implementation(libs.sshj)
     implementation(libs.bouncycastle.bcprov)
+    constraints {
+        // A-19 (was R-07): force Bouncy Castle 1.85 across the
+        // whole graph. sshj 0.40.0 pulls BC 1.84 transitively,
+        // which carries GHSA-9pwp and GHSA-qp49 (bcprov) and
+        // GHSA-wg6q (bcpkix); 1.85 clears all three. bcpkix is
+        // transitive-only in this graph, so without the explicit
+        // constraint it would stay behind the direct bcprov
+        // declaration. (bcutil follows bcpkix 1.85's own POM.)
+        implementation(libs.bouncycastle.bcprov)
+        implementation(libs.bouncycastle.bcpkix)
+    }
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.biometric)
     // Compose BOM must be declared inside dependencies {}, not at the

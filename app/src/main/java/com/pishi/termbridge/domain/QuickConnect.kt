@@ -64,6 +64,11 @@ object QuickConnect {
             port = hostPart.substring(colon + 1).toIntOrNull() ?: return null
             hostPart = hostPart.substring(0, colon)
         }
+        // Audit #3 (A-15): convert an internationalized name to
+        // its punycode form before the shape check, so the
+        // target (and anything pre-filled or dialled from it)
+        // carries the ASCII form.
+        hostPart = HostValidator.asciiHostname(hostPart)
         if (!hostPattern.matches(hostPart)) return null
         if (user != null && !userPattern.matches(user)) return null
         val finalPort = port ?: 22

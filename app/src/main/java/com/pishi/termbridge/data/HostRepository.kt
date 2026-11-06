@@ -7,6 +7,7 @@ import com.pishi.termbridge.domain.HostValidator
 import com.pishi.termbridge.domain.ValidationIssue
 import com.pishi.termbridge.domain.wipe
 import com.pishi.termbridge.security.SecretCrypto
+import com.pishi.termbridge.settings.TranscriptStorage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -67,7 +68,15 @@ class HostRepository(
     // entry instead of an inline credential, and loadCredential
     // resolves the reference. Production passes it (see
     // TermBridgeApplication).
-    private val keychainDao: KeychainDao? = null
+    private val keychainDao: KeychainDao? = null,
+    // Audit #3 (A-05): optional for the same reason. When
+    // present, deleting a host also purges its on-disk session
+    // transcripts — before this, the transcript files (and
+    // their scrubbed-but-plaintext session content) survived
+    // deletion forever, with no delete path anywhere.
+    // Production passes the app's TranscriptStore (see
+    // TermBridgeApplication).
+    private val transcriptStorage: TranscriptStorage? = null
 ) : com.pishi.termbridge.transport.HostKeyTrustStore {
     fun getHosts(): Flow<List<HostProfile>> =
         hostDao.getAll().map { rows -> rows.map { it.toProfile() } }
@@ -158,7 +167,11 @@ class HostRepository(
         val entity = HostEntity(
             id = if (isNew) 0L else profile.id,
             name = profile.name.trim(),
-            hostname = profile.hostname.trim(),
+            // Audit #3 (A-15): the stored form is the punycode
+            // (ASCII) conversion of what the user typed, so
+            // dialling and endpoint matching never see the
+            // internationalized spelling.
+            hostname = HostValidator.asciiHostname(profile.hostname.trim()),
             port = profile.port,
             username = profile.username.trim(),
             authType = profile.authType.name,
@@ -257,6 +270,17 @@ class HostRepository(
                 trustedHostKeyDao.deleteByEndpoint(endpoint)
             }
             hostDao.deleteById(id)
+        }
+        // Audit #3 (A-05): purge the host's transcript files
+        // once the database work has committed. Best-effort by
+        // design — the files live outside the database
+        // transaction, and a filesystem failure here must not
+        // turn a completed deletion into an error.
+        try {
+            transcriptStorage?.clear(id)
+        } catch (_: Exception) {
+            // The host is gone; a stranded transcript file is
+            // orphaned data, not a failed deletion.
         }
     }
 

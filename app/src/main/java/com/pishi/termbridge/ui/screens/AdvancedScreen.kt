@@ -651,6 +651,7 @@ private fun TunnelSessionSection(
             label = { Text(stringResource(R.string.advanced_passphrase_target)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(Spacing.small))
@@ -663,6 +664,7 @@ private fun TunnelSessionSection(
                 label = { Text(stringResource(R.string.advanced_passphrase_hop, hop.name)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(Spacing.small))

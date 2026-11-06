@@ -2,13 +2,15 @@ package com.pishi.termbridge.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -39,6 +41,7 @@ import com.pishi.termbridge.domain.CommandButton
 import com.pishi.termbridge.domain.CommandMode
 import com.pishi.termbridge.domain.CommandValidator
 import com.pishi.termbridge.domain.CommandVariable
+import com.pishi.termbridge.ui.components.DiscardChangesDialog
 import com.pishi.termbridge.ui.components.EmptyState
 import com.pishi.termbridge.ui.components.PrimaryAction
 import com.pishi.termbridge.ui.components.SecondaryAction
@@ -111,150 +114,178 @@ fun CommandsScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(Spacing.medium)
+    // Audit #3 (A-28): the whole screen is one LazyColumn —
+    // host rows and button rows are items(), so a long host
+    // list or button list no longer composes every row eagerly.
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(Spacing.medium)
     ) {
         if (hosts.isEmpty()) {
-            EmptyState(
-                title = stringResource(R.string.session_no_hosts_title),
-                body = stringResource(R.string.session_no_hosts_body),
-                actionLabel = stringResource(R.string.action_add_host),
-                onAction = onAddHost
-            )
-            return@Column
-        }
-        Text(text = stringResource(R.string.commands_select_host))
-        Spacer(modifier = Modifier.height(Spacing.small))
-        // Global snippets (item T-02): a pseudo-entry above the
-        // hosts; its buttons are offered in every session.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Spacing.minTouch)
-                .clickable {
-                    viewModel.selectHost(com.pishi.termbridge.data.GLOBAL_HOST_ID)
-                },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = selectedHostId == com.pishi.termbridge.data.GLOBAL_HOST_ID,
-                onClick = {
-                    viewModel.selectHost(com.pishi.termbridge.data.GLOBAL_HOST_ID)
-                }
-            )
-            Column {
-                Text(
-                    text = stringResource(R.string.commands_global_title),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = stringResource(R.string.commands_global_sub),
-                    style = MaterialTheme.typography.bodySmall
+            item {
+                EmptyState(
+                    title = stringResource(R.string.session_no_hosts_title),
+                    body = stringResource(R.string.session_no_hosts_body),
+                    actionLabel = stringResource(R.string.action_add_host),
+                    onAction = onAddHost
                 )
             }
-        }
-        hosts.forEach { host ->
-            // Prompt 14: whole-row selection, 48dp minimum.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = Spacing.minTouch)
-                    .clickable { viewModel.selectHost(host.id) },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadioButton(
-                    selected = selectedHostId == host.id,
-                    onClick = { viewModel.selectHost(host.id) }
-                )
-                Column {
-                    Text(text = host.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        text = "${host.username}@${host.hostname}:${host.port}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        }
-        val selected = selectedHostId
-        if (selected == null) {
-            return@Column
-        }
-        Spacer(modifier = Modifier.height(Spacing.large))
-        PrimaryAction(
-            label = stringResource(R.string.commands_add_button),
-            onClick = { viewModel.startAdd() }
-        )
-        Spacer(modifier = Modifier.height(Spacing.small))
-        SecondaryAction(
-            label = stringResource(R.string.commands_action_open_session),
-            onClick = onOpenSession
-        )
-        error?.let {
-            Spacer(modifier = Modifier.height(Spacing.small))
-            Text(text = it, color = MaterialTheme.colorScheme.error)
-        }
-        if (buttons.isEmpty()) {
-            Spacer(modifier = Modifier.height(Spacing.large))
-            EmptyState(
-                title = stringResource(R.string.commands_no_buttons_title),
-                body = stringResource(R.string.commands_no_buttons_body)
-            )
         } else {
-            Spacer(modifier = Modifier.height(Spacing.medium))
-            Text(
-                text = stringResource(R.string.commands_sequence_note),
-                style = MaterialTheme.typography.bodySmall
-            )
-            buttons.forEach { button ->
-                Spacer(modifier = Modifier.height(Spacing.medium))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = button.label, style = MaterialTheme.typography.bodyLarge)
-                        val modeText = when (button.mode) {
-                            CommandMode.INSERT_ONLY -> stringResource(R.string.commands_mode_insert_short)
-                            CommandMode.EXECUTE_ONE -> stringResource(R.string.commands_mode_execute_short)
-                            CommandMode.SEQUENCE -> stringResource(R.string.commands_mode_sequence_short)
+            item {
+                Text(text = stringResource(R.string.commands_select_host))
+                Spacer(modifier = Modifier.height(Spacing.small))
+            }
+            // Global snippets (item T-02): a pseudo-entry above the
+            // hosts; its buttons are offered in every session.
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Spacing.minTouch)
+                        .clickable {
+                            viewModel.selectHost(com.pishi.termbridge.data.GLOBAL_HOST_ID)
+                        },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = selectedHostId == com.pishi.termbridge.data.GLOBAL_HOST_ID,
+                        onClick = {
+                            viewModel.selectHost(com.pishi.termbridge.data.GLOBAL_HOST_ID)
                         }
+                    )
+                    Column {
                         Text(
-                            text = listOfNotNull(
-                                button.category.ifBlank { null },
-                                modeText
-                            ).joinToString(" • "),
+                            text = stringResource(R.string.commands_global_title),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = stringResource(R.string.commands_global_sub),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    IconButton(onClick = { viewModel.startEdit(button.id) }) {
-                        Icon(
-                            imageVector = Icons.Filled.Edit,
-                            contentDescription = stringResource(R.string.commands_action_edit)
+                }
+            }
+            items(hosts, key = { it.id }) { host ->
+                // Prompt 14: whole-row selection, 48dp minimum.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Spacing.minTouch)
+                        .clickable { viewModel.selectHost(host.id) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = selectedHostId == host.id,
+                        onClick = { viewModel.selectHost(host.id) }
+                    )
+                    Column {
+                        Text(text = host.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "${host.username}@${host.hostname}:${host.port}",
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    IconButton(onClick = { viewModel.duplicateButton(button.id) }) {
-                        Icon(
-                            imageVector = Icons.Filled.ContentCopy,
-                            contentDescription = stringResource(R.string.commands_action_duplicate)
+                }
+            }
+            val selected = selectedHostId
+            if (selected != null) {
+                item {
+                    Spacer(modifier = Modifier.height(Spacing.large))
+                    PrimaryAction(
+                        label = stringResource(R.string.commands_add_button),
+                        onClick = { viewModel.startAdd() }
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.small))
+                    SecondaryAction(
+                        label = stringResource(R.string.commands_action_open_session),
+                        onClick = onOpenSession
+                    )
+                    error?.let {
+                        Spacer(modifier = Modifier.height(Spacing.small))
+                        Text(text = it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                if (buttons.isEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(Spacing.large))
+                        EmptyState(
+                            title = stringResource(R.string.commands_no_buttons_title),
+                            body = stringResource(R.string.commands_no_buttons_body)
                         )
                     }
-                    IconButton(onClick = { viewModel.moveButton(button.id, true) }) {
-                        Icon(
-                            imageVector = Icons.Filled.ArrowUpward,
-                            contentDescription = stringResource(R.string.commands_action_move_up)
+                } else {
+                    item {
+                        Spacer(modifier = Modifier.height(Spacing.medium))
+                        Text(
+                            text = stringResource(R.string.commands_sequence_note),
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    IconButton(onClick = { viewModel.moveButton(button.id, false) }) {
-                        Icon(
-                            imageVector = Icons.Filled.ArrowDownward,
-                            contentDescription = stringResource(R.string.commands_action_move_down)
-                        )
-                    }
-                    IconButton(onClick = { pendingDelete = button }) {
-                        Icon(
-                            imageVector = Icons.Filled.Delete,
-                            contentDescription = stringResource(R.string.action_delete)
-                        )
+                    items(buttons, key = { it.id }) { button ->
+                        Column {
+                            Spacer(modifier = Modifier.height(Spacing.medium))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = button.label,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    val modeText = when (button.mode) {
+                                        CommandMode.INSERT_ONLY ->
+                                            stringResource(R.string.commands_mode_insert_short)
+                                        CommandMode.EXECUTE_ONE ->
+                                            stringResource(R.string.commands_mode_execute_short)
+                                        CommandMode.SEQUENCE ->
+                                            stringResource(R.string.commands_mode_sequence_short)
+                                    }
+                                    Text(
+                                        text = listOfNotNull(
+                                            button.category.ifBlank { null },
+                                            modeText
+                                        ).joinToString(" • "),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.startEdit(button.id) }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Edit,
+                                        contentDescription = stringResource(
+                                            R.string.commands_action_edit
+                                        )
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.duplicateButton(button.id) }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ContentCopy,
+                                        contentDescription = stringResource(
+                                            R.string.commands_action_duplicate
+                                        )
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.moveButton(button.id, true) }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ArrowUpward,
+                                        contentDescription = stringResource(
+                                            R.string.commands_action_move_up
+                                        )
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.moveButton(button.id, false) }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ArrowDownward,
+                                        contentDescription = stringResource(
+                                            R.string.commands_action_move_down
+                                        )
+                                    )
+                                }
+                                IconButton(onClick = { pendingDelete = button }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = stringResource(R.string.action_delete)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -295,28 +326,53 @@ private fun CommandFormDialog(
     var category by remember(initial.id) { mutableStateOf(initial.category) }
     var mode by remember(initial.id) { mutableStateOf(initial.mode) }
     var template by remember(initial.id) { mutableStateOf(initial.template) }
-    var stepsText by remember(initial.id) {
-        mutableStateOf(initial.steps.joinToString("\n"))
-    }
-    var variablesText by remember(initial.id) {
-        mutableStateOf(
-            initial.variables.joinToString("\n") { variable ->
-                if (variable.defaultValue.isNotEmpty()) {
-                    "${variable.name}=${variable.defaultValue}"
-                } else {
-                    variable.name
-                }
+    val initialStepsText = remember(initial.id) { initial.steps.joinToString("\n") }
+    val initialVariablesText = remember(initial.id) {
+        initial.variables.joinToString("\n") { variable ->
+            if (variable.defaultValue.isNotEmpty()) {
+                "${variable.name}=${variable.defaultValue}"
+            } else {
+                variable.name
             }
-        )
+        }
     }
-    var requiredText by remember(initial.id) {
-        mutableStateOf(initial.variables.filter { it.required }.joinToString(", ") { it.name })
+    val initialRequiredText = remember(initial.id) {
+        initial.variables.filter { it.required }.joinToString(", ") { it.name }
     }
+    var stepsText by remember(initial.id) { mutableStateOf(initialStepsText) }
+    var variablesText by remember(initial.id) { mutableStateOf(initialVariablesText) }
+    var requiredText by remember(initial.id) { mutableStateOf(initialRequiredText) }
     var fieldErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val isEdit = initial.id != 0L
 
+    // Audit #3 (A-17): dismissing with edits — Back, scrim tap,
+    // or the Cancel button, all of which reach onDismiss —
+    // asks first. A dialog's onDismissRequest IS its back path,
+    // so the guard hooks it instead of a BackHandler.
+    val formDirty = label != initial.label || category != initial.category ||
+        mode != initial.mode || template != initial.template ||
+        stepsText != initialStepsText || variablesText != initialVariablesText ||
+        requiredText != initialRequiredText
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    val guardedDismiss = {
+        if (formDirty) {
+            showDiscardConfirm = true
+        } else {
+            onDismiss()
+        }
+    }
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(
+            onDiscard = {
+                showDiscardConfirm = false
+                onDismiss()
+            },
+            onKeepEditing = { showDiscardConfirm = false }
+        )
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = guardedDismiss,
         title = {
             Text(
                 if (isEdit) {
@@ -480,7 +536,7 @@ private fun CommandFormDialog(
             ) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = guardedDismiss) {
                 Text(stringResource(R.string.action_cancel))
             }
         }

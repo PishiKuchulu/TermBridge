@@ -40,4 +40,41 @@ class PinLockTest {
         assertEquals(120_000L, PinLock.backoffMs(8))
         assertEquals(600_000L, PinLock.backoffMs(12))
     }
+
+    @Test
+    fun lockCostMatchesBackupExportCost() {
+        // Audit #3 (A-23): parity with ExportCrypto's 600,000,
+        // with the pre-raise cost kept as the verify-only legacy.
+        assertEquals(600_000, PinLock.ITERATIONS)
+        assertEquals(120_000, PinLock.LEGACY_ITERATIONS)
+    }
+
+    @Test
+    fun hashVerifiesAtCurrentAndLegacyCosts() {
+        // Audit #3 (A-23): hashes are stored without their
+        // iteration count, so the current cost and the legacy
+        // cost must each round-trip under their own count — and
+        // must NOT verify under the other count (otherwise the
+        // AppLockStore fallback could not tell them apart).
+        val salt = PinLock.newSalt()
+        val current = PinLock.hash("4321", salt)
+        assertTrue(PinLock.verify("4321", salt, current))
+        assertFalse(PinLock.verify("4321", salt, current, iterations = PinLock.LEGACY_ITERATIONS))
+
+        val legacy = PinLock.hash("4321", salt, iterations = PinLock.LEGACY_ITERATIONS)
+        assertTrue(PinLock.verify("4321", salt, legacy, iterations = PinLock.LEGACY_ITERATIONS))
+        assertFalse(PinLock.verify("4321", salt, legacy))
+    }
+
+    @Test
+    fun wrongPinRejectedAtBothCosts() {
+        val salt = PinLock.newSalt()
+        val current = PinLock.hash("4321", salt)
+        assertFalse(PinLock.verify("4322", salt, current))
+        assertFalse(PinLock.verify("4322", salt, current, iterations = PinLock.LEGACY_ITERATIONS))
+
+        val legacy = PinLock.hash("4321", salt, iterations = PinLock.LEGACY_ITERATIONS)
+        assertFalse(PinLock.verify("4322", salt, legacy, iterations = PinLock.LEGACY_ITERATIONS))
+        assertFalse(PinLock.verify("4322", salt, legacy))
+    }
 }

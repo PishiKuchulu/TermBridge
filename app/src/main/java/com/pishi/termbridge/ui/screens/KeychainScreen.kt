@@ -1,5 +1,6 @@
 package com.pishi.termbridge.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -15,9 +16,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +34,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,13 +44,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.domain.KeyFileParser
 import com.pishi.termbridge.domain.KeychainEntry
+import com.pishi.termbridge.ui.components.DiscardChangesDialog
 import com.pishi.termbridge.ui.components.EmptyState
 import com.pishi.termbridge.ui.components.PrimaryAction
 import com.pishi.termbridge.ui.theme.Spacing
@@ -67,6 +77,29 @@ fun KeychainScreen(viewModel: KeychainViewModel, modifier: Modifier = Modifier) 
     val entries by viewModel.entries.collectAsState()
     val message by viewModel.message.collectAsState()
     var pendingDelete by remember { mutableStateOf<KeychainEntry?>(null) }
+
+    // Audit #3 (A-17): the add panel below holds unsaved
+    // credentials (typed, pasted, or mid-import); Back while it
+    // is dirty asks first. The panel reports its dirty state up.
+    var panelDirty by remember { mutableStateOf(false) }
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    var discardConfirmed by remember { mutableStateOf(false) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    BackHandler(enabled = panelDirty && !discardConfirmed) {
+        showDiscardConfirm = true
+    }
+    LaunchedEffect(discardConfirmed) {
+        if (discardConfirmed) backDispatcher?.onBackPressed()
+    }
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(
+            onDiscard = {
+                showDiscardConfirm = false
+                discardConfirmed = true
+            },
+            onKeepEditing = { showDiscardConfirm = false }
+        )
+    }
 
     // One scrolling column for everything: on a short screen
     // the add panel must not push the list (or its own action
@@ -133,7 +166,10 @@ fun KeychainScreen(viewModel: KeychainViewModel, modifier: Modifier = Modifier) 
             }
         item {
             HorizontalDivider()
-            AddEntryPanel(viewModel = viewModel)
+            AddEntryPanel(
+                viewModel = viewModel,
+                onDirtyChange = { panelDirty = it }
+            )
         }
         message?.let { text ->
             item {
@@ -172,15 +208,30 @@ fun KeychainScreen(viewModel: KeychainViewModel, modifier: Modifier = Modifier) 
 }
 
 @Composable
-private fun AddEntryPanel(viewModel: KeychainViewModel, modifier: Modifier = Modifier) {
+private fun AddEntryPanel(
+    viewModel: KeychainViewModel,
+    onDirtyChange: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     var mode by remember { mutableStateOf(AddMode.PASSWORD) }
     var label by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var pem by remember { mutableStateOf("") }
     var passphrase by remember { mutableStateOf("") }
     var importPassphrase by remember { mutableStateOf("") }
+    // Audit #3 (A-14): the pasted key is masked until revealed.
+    var pemVisible by remember { mutableStateOf(false) }
     val importState by viewModel.importState.collectAsState()
     val context = LocalContext.current
+
+    // Audit #3 (A-17): anything typed/pasted here — or an
+    // import waiting for its passphrase or save — is unsaved.
+    val panelDirty = label.isNotBlank() || password.isNotEmpty() ||
+        pem.isNotBlank() || passphrase.isNotEmpty() ||
+        importPassphrase.isNotEmpty() ||
+        importState != KeychainViewModel.ImportState.None
+    LaunchedEffect(panelDirty) { onDirtyChange(panelDirty) }
+    DisposableEffect(Unit) { onDispose { onDirtyChange(false) } }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -244,6 +295,7 @@ private fun AddEntryPanel(viewModel: KeychainViewModel, modifier: Modifier = Mod
                     label = { Text(stringResource(R.string.field_password)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(Spacing.small))
@@ -262,6 +314,25 @@ private fun AddEntryPanel(viewModel: KeychainViewModel, modifier: Modifier = Mod
                     onValueChange = { pem = it },
                     label = { Text(stringResource(R.string.field_private_key)) },
                     minLines = 4,
+                    visualTransformation = if (pemVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { pemVisible = !pemVisible }) {
+                            Icon(
+                                imageVector = if (pemVisible) {
+                                    Icons.Filled.VisibilityOff
+                                } else {
+                                    Icons.Filled.Visibility
+                                },
+                                contentDescription = stringResource(
+                                    if (pemVisible) R.string.secret_hide else R.string.secret_show
+                                )
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(Spacing.small))
@@ -271,6 +342,7 @@ private fun AddEntryPanel(viewModel: KeychainViewModel, modifier: Modifier = Mod
                     label = { Text(stringResource(R.string.field_passphrase)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(Spacing.small))
@@ -306,6 +378,7 @@ private fun AddEntryPanel(viewModel: KeychainViewModel, modifier: Modifier = Mod
                             label = { Text(stringResource(R.string.field_passphrase)) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(Spacing.small))

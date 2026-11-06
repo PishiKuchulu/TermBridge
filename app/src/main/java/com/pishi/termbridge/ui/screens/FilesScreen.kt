@@ -1,5 +1,6 @@
 package com.pishi.termbridge.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -33,6 +35,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,9 +44,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.pishi.termbridge.R
+import com.pishi.termbridge.ui.resolve
 import com.pishi.termbridge.domain.AuthType
 import com.pishi.termbridge.transport.RemoteEntry as TransportRemoteEntry
 import com.pishi.termbridge.ui.components.EmptyState
@@ -93,6 +99,42 @@ fun FilesScreen(
     var selectMode by remember { mutableStateOf(false) }
     var showBulkDelete by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Audit #3 (A-16, warning half): this screen's ViewModel is
+    // destination-scoped, so leaving mid-transfer kills the
+    // transfer in onCleared. Back while a transfer is running
+    // asks first; only the dialog's Leave lets the press
+    // through (the handler disables itself, then the press is
+    // re-dispatched). The ViewModel's scope is unchanged.
+    var showLeaveConfirm by remember { mutableStateOf(false) }
+    var leaveConfirmed by remember { mutableStateOf(false) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    BackHandler(enabled = uiState.transfer != null && !leaveConfirmed) {
+        showLeaveConfirm = true
+    }
+    LaunchedEffect(leaveConfirmed) {
+        if (leaveConfirmed) backDispatcher?.onBackPressed()
+    }
+    if (showLeaveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLeaveConfirm = false },
+            title = { Text(stringResource(R.string.files_leave_title)) },
+            text = { Text(stringResource(R.string.files_leave_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLeaveConfirm = false
+                        leaveConfirmed = true
+                    }
+                ) { Text(stringResource(R.string.action_leave)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
 
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -304,6 +346,7 @@ fun FilesScreen(
                     placeholder = { Text(stringResource(R.string.session_passphrase_hint)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -326,7 +369,7 @@ fun FilesScreen(
                 )
                 uiState.errorMessage?.let {
                     Spacer(modifier = Modifier.height(Spacing.small))
-                    Text(text = it, color = MaterialTheme.colorScheme.error)
+                    Text(text = it.resolve(), color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -339,7 +382,7 @@ fun FilesScreen(
             Text(text = stringResource(R.string.files_current_path, uiState.currentPath))
             uiState.infoMessage?.let {
                 Spacer(modifier = Modifier.height(Spacing.small))
-                Text(text = it, style = MaterialTheme.typography.bodySmall)
+                Text(text = it.resolve(), style = MaterialTheme.typography.bodySmall)
             }
             // Prompt 09: when the host has a local folder, the
             // download button writes straight into it instead of
@@ -605,7 +648,7 @@ fun FilesScreen(
             }
             uiState.errorMessage?.let {
                 Spacer(modifier = Modifier.height(Spacing.small))
-                Text(text = it, color = MaterialTheme.colorScheme.error)
+                Text(text = it.resolve(), color = MaterialTheme.colorScheme.error)
             }
         }
         if (uiState.entries.isEmpty()) {
@@ -635,8 +678,22 @@ fun FilesScreen(
                             )
                         }
                         Icon(
-                            imageVector = if (entry.isDirectory) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
-                            contentDescription = null
+                            imageVector = if (entry.isDirectory) {
+                                Icons.Filled.Folder
+                            } else {
+                                Icons.Filled.InsertDriveFile
+                            },
+                            // Audit #3 (A-29): the type icon is
+                            // the only place some rows announce
+                            // their kind (files show a size, not
+                            // a type), so it carries the label.
+                            contentDescription = stringResource(
+                                when {
+                                    entry.isDirectory -> R.string.files_directory
+                                    entry.isRegularFile -> R.string.files_file
+                                    else -> R.string.files_special
+                                }
+                            )
                         )
                         Column(modifier = Modifier.weight(1f).padding(start = Spacing.small)) {
                             Text(text = entry.name, style = MaterialTheme.typography.bodyLarge)

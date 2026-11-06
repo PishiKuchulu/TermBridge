@@ -1,6 +1,7 @@
 package com.pishi.termbridge.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -27,6 +29,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,11 +39,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.EnvVarInfo
 import com.pishi.termbridge.domain.RemoteShell
+import com.pishi.termbridge.ui.components.DiscardChangesDialog
 import com.pishi.termbridge.ui.components.PrimaryAction
 import com.pishi.termbridge.ui.components.SecondaryAction
 import com.pishi.termbridge.ui.theme.Spacing
@@ -71,6 +77,40 @@ fun HostEnvironmentScreen(
     var varDialog by remember { mutableStateOf<EnvVarInfo?>(null) }
     var showAddVar by remember { mutableStateOf(false) }
     var pendingDeleteVar by remember { mutableStateOf<EnvVarInfo?>(null) }
+    var showDeleteTranscript by remember { mutableStateOf(false) }
+
+    // Audit #3 (A-17): the settings form is only written on
+    // Save, so Back with edits that differ from the stored
+    // settings asks first. The baseline is the stored-settings
+    // flow itself (its defaults match the form's initial values
+    // when nothing is stored yet); a successful save re-emits
+    // it, which clears the dirty state on its own.
+    val storedSettings by viewModel.settings.collectAsState()
+    val settingsDirty =
+        viewModel.remoteWorkingDirectory != (storedSettings?.remoteWorkingDirectory ?: "") ||
+            viewModel.remoteShell != (storedSettings?.remoteShell ?: RemoteShell.POSIX) ||
+            viewModel.localDirectoryUri != storedSettings?.localDirectoryUri ||
+            viewModel.envExportFallback != (storedSettings?.envExportFallback ?: false) ||
+            viewModel.sessionLogEnabled != (storedSettings?.sessionLogEnabled ?: false) ||
+            viewModel.sessionLogInBackup != (storedSettings?.sessionLogInBackup ?: false)
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    var discardConfirmed by remember { mutableStateOf(false) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    BackHandler(enabled = settingsDirty && !discardConfirmed) {
+        showDiscardConfirm = true
+    }
+    LaunchedEffect(discardConfirmed) {
+        if (discardConfirmed) backDispatcher?.onBackPressed()
+    }
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(
+            onDiscard = {
+                showDiscardConfirm = false
+                discardConfirmed = true
+            },
+            onKeepEditing = { showDiscardConfirm = false }
+        )
+    }
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -121,6 +161,26 @@ fun HostEnvironmentScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeleteVar = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+    if (showDeleteTranscript) {
+        AlertDialog(
+            onDismissRequest = { showDeleteTranscript = false },
+            title = { Text(stringResource(R.string.env_delete_transcript_title)) },
+            text = { Text(stringResource(R.string.env_delete_transcript_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteTranscript()
+                        showDeleteTranscript = false
+                    }
+                ) { Text(stringResource(R.string.action_delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteTranscript = false }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             }
@@ -252,6 +312,19 @@ fun HostEnvironmentScreen(
                     onCheckedChange = { viewModel.sessionLogInBackup = it }
                 )
             }
+        }
+        // Audit #3 (A-05): deleting the saved transcript is
+        // offered only when one actually exists for this host.
+        if (viewModel.hasTranscript) {
+            Spacer(modifier = Modifier.height(Spacing.medium))
+            SecondaryAction(
+                label = stringResource(R.string.env_delete_transcript),
+                onClick = { showDeleteTranscript = true }
+            )
+        }
+        if (viewModel.transcriptDeleted) {
+            Spacer(modifier = Modifier.height(Spacing.small))
+            Text(text = stringResource(R.string.env_transcript_deleted))
         }
         Spacer(modifier = Modifier.height(Spacing.large))
 
@@ -385,8 +458,30 @@ private fun EnvVarDialog(
     val scope = rememberCoroutineScope()
     val blankNameError = stringResource(R.string.env_var_name_blank)
 
+    // Audit #3 (A-17): a typed value is write-only and cannot
+    // be recovered once this dialog closes, so dismissing with
+    // edits asks first — same guard as the screen-level forms.
+    val varDirty = name != (existing?.name ?: "") || value.isNotEmpty()
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    val guardedDismiss = {
+        if (varDirty) {
+            showDiscardConfirm = true
+        } else {
+            onDismiss()
+        }
+    }
+    if (showDiscardConfirm) {
+        DiscardChangesDialog(
+            onDiscard = {
+                showDiscardConfirm = false
+                onDismiss()
+            },
+            onKeepEditing = { showDiscardConfirm = false }
+        )
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = guardedDismiss,
         title = {
             Text(
                 stringResource(
@@ -420,6 +515,7 @@ private fun EnvVarDialog(
                     },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth()
                 )
                 error?.let {
@@ -451,7 +547,7 @@ private fun EnvVarDialog(
             ) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = guardedDismiss) {
                 Text(stringResource(R.string.action_cancel))
             }
         }

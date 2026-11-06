@@ -9,6 +9,36 @@ package com.pishi.termbridge.domain
 object HostValidator {
     private val hostnameChars = Regex("^[A-Za-z0-9._\\-\\[\\]:]+$")
 
+    /**
+     * Audit #3 (A-15): the ASCII (punycode) form of a hostname
+     * the user typed. Each dot-separated label goes through
+     * [java.net.IDN.toASCII]; already-ASCII labels pass through
+     * unchanged, and IP literals (anything containing ':' or
+     * brackets) are returned as-is — IDN conversion is for
+     * names, not addresses. A label IDN cannot convert is kept
+     * verbatim, so validation below rejects it with the usual
+     * message instead of this function throwing. Validation,
+     * storage, and dialling all use this converted form, so a
+     * Persian-script domain is accepted and stored as its
+     * `xn--` name.
+     */
+    fun asciiHostname(hostname: String): String {
+        if (hostname.contains(':') || hostname.contains('[') || hostname.contains(']')) {
+            return hostname
+        }
+        return hostname.split('.').joinToString(".") { label ->
+            if (label.isEmpty() || label.all { it.code < 128 }) {
+                label
+            } else {
+                try {
+                    java.net.IDN.toASCII(label)
+                } catch (_: Exception) {
+                    label
+                }
+            }
+        }
+    }
+
     fun validate(profile: HostProfile): List<ValidationIssue> {
         val issues = mutableListOf<ValidationIssue>()
         if (profile.name.isBlank()) {
@@ -16,8 +46,14 @@ object HostValidator {
         }
         if (profile.hostname.isBlank()) {
             issues += ValidationIssue("hostname", "Hostname must not be blank.")
-        } else if (!hostnameChars.matches(profile.hostname) || profile.hostname.length > 253) {
-            issues += ValidationIssue("hostname", "Hostname contains invalid characters.")
+        } else {
+            // Audit #3 (A-15): the shape and length rules apply
+            // to the converted (punycode) form — that is what
+            // gets stored and dialled.
+            val ascii = asciiHostname(profile.hostname)
+            if (!hostnameChars.matches(ascii) || ascii.length > 253) {
+                issues += ValidationIssue("hostname", "Hostname contains invalid characters.")
+            }
         }
         if (profile.port !in 1..65535) {
             issues += ValidationIssue("port", "Port must be between 1 and 65535.")

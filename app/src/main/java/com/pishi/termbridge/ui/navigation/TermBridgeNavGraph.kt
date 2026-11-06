@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -126,7 +127,12 @@ private fun titleResFor(route: String?): Int = when (route) {
 
 /**
  * Prompt 03 app shell: one Scaffold, one NavHost, predictable back
- * behaviour. Back goes to the previous destination via navigateUp.
+ * behaviour. Back goes to the previous destination: the top-bar
+ * arrow dispatches through the activity's OnBackPressedDispatcher
+ * (audit #3, A-17) so a screen's BackHandler guard — a dirty
+ * editor, an in-flight transfer — gets the first chance, and
+ * when no handler consumes the press the NavController's own
+ * dispatcher callback pops the stack exactly like navigateUp.
  *
  * Prompt 14 note on the prompt-06 "session-aware back" item: back
  * does NOT kill a live session, because the session ViewModel is
@@ -171,6 +177,11 @@ fun TermBridgeApp(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val canGoBack = navController.previousBackStackEntry != null
+    // Audit #3 (A-17): the top-bar arrow goes through the
+    // activity back dispatcher (see the shell note above);
+    // navigateUp remains the fallback if no dispatcher owner
+    // is present (previews).
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     // Immersive terminal (item Q-01): the session screen reports
     // its expanded state; the chrome follows it, and leaving the
     // session route always restores the chrome.
@@ -253,7 +264,10 @@ fun TermBridgeApp(
                 title = { Text(text = stringResource(titleResFor(currentRoute))) },
                 navigationIcon = {
                     if (canGoBack) {
-                        IconButton(onClick = { navController.navigateUp() }) {
+                        IconButton(onClick = {
+                            backDispatcher?.onBackPressed()
+                                ?: navController.navigateUp()
+                        }) {
                             Icon(
                                 imageVector = Icons.Filled.ArrowBack,
                                 contentDescription = stringResource(R.string.action_back)
@@ -423,7 +437,8 @@ fun TermBridgeApp(
                         factory = HostEnvironmentViewModelFactory(
                             environmentRepository,
                             repository,
-                            hostId
+                            hostId,
+                            transcriptStore
                         )
                     )
                 )
@@ -525,7 +540,8 @@ fun TermBridgeApp(
                     onAbout = { navController.navigate(Routes.ABOUT) },
                     onBackup = { navController.navigate(Routes.BACKUP) },
                     customThemes = customs,
-                    onEditCustomThemes = { navController.navigate(Routes.THEMES) }
+                    onEditCustomThemes = { navController.navigate(Routes.THEMES) },
+                    onClearCommandHistory = { commandHistoryStore.clear() }
                 )
             }
             composable(Routes.THEMES) {

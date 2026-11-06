@@ -9,7 +9,7 @@ import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
 **Status: in active development, NOT a release.** Version
-`0.1.0-foundation` (versionCode 1), database v5. CI went
+`0.1.0-foundation` (versionCode 1), database v10. CI went
 green for the first time on 2026-10-25 (run #13: unit tests
 + debug assemble + emulator instrumented tests). Since then:
 the 9-phase security remediation and the review-2 fix wave

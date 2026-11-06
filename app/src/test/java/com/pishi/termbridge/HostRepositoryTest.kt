@@ -278,4 +278,49 @@ class HostRepositoryTest {
         }
     }
 
+    /** Minimal in-memory TranscriptStorage for the A-05 tests. */
+    private class RecordingTranscriptStorage(
+        private val failOnClear: Boolean = false
+    ) : com.pishi.termbridge.settings.TranscriptStorage {
+        val cleared = mutableListOf<Long>()
+        override fun append(hostId: Long, text: String) = Unit
+        override fun read(hostId: Long): String = ""
+        override fun write(hostId: Long, text: String) = Unit
+        override fun clear(hostId: Long) {
+            if (failOnClear) throw IllegalStateException("disk gone")
+            cleared += hostId
+        }
+    }
+
+    @Test
+    fun deleteHostPurgesTranscripts() = runTest {
+        // Audit #3 (A-05): deleting a host must purge its
+        // on-disk session transcripts, which previously survived
+        // deletion forever with no delete path anywhere.
+        val transcripts = RecordingTranscriptStorage()
+        val repo = HostRepository(
+            FakeHostDao(), FakeTrustedHostKeyDao(), FakeSecretCrypto(),
+            transcriptStorage = transcripts
+        )
+        val saved = repo.saveHost(profile(), CredentialInput.Password("s3cr3t".toCharArray()))
+        repo.deleteHost(saved.id)
+        assertNull(repo.getHost(saved.id))
+        assertEquals(listOf(saved.id), transcripts.cleared)
+    }
+
+    @Test
+    fun deleteHostSucceedsWhenTranscriptPurgeFails() = runTest {
+        // Audit #3 (A-05): the purge is best-effort — a storage
+        // failure must not turn a completed deletion into an
+        // error.
+        val transcripts = RecordingTranscriptStorage(failOnClear = true)
+        val repo = HostRepository(
+            FakeHostDao(), FakeTrustedHostKeyDao(), FakeSecretCrypto(),
+            transcriptStorage = transcripts
+        )
+        val saved = repo.saveHost(profile(), CredentialInput.Password("s3cr3t".toCharArray()))
+        repo.deleteHost(saved.id)
+        assertNull(repo.getHost(saved.id))
+    }
+
 }

@@ -15,7 +15,7 @@ native failure cannot destabilise the SSH core).
 | `domain` | Use cases, session/command/file rules, validation, confirmation policy for risky actions | Know about Room, Keystore internals, or a specific SSH library |
 | `data` | Host/command repositories, persistence, import/export codecs (prompt 11) | Store a secret in plaintext; log a secret |
 | `security` | Key management, encryption/decryption, host-key store, passphrase handling, redaction | Decide product policy (e.g. which actions need confirmation) |
-| `transport` | Protocol interfaces + implementations behind them: `SshTransport`, `SftpTransport`, `TerminalSession`, `RemoteDesktopTransport` (RDP/VNC, later) | Be referenced by UI directly; silently bypass host-key verification |
+| `transport` | Protocol interfaces + implementations behind them: `SshTransport`, `SftpManager`, `TerminalSession`, `RfbSession` (VNC) | Be referenced by UI directly; silently bypass host-key verification |
 | `diagnostics` | Connection diagnostics, non-sensitive error reporting | Include hostnames/credentials/command text in crash reports by default |
 
 ## Data flow
@@ -28,7 +28,14 @@ native failure cannot destabilise the SSH core).
    via the `security` host-key store, and only then opens a shell or SFTP
    channel.
 4. Terminal bytes flow: transport → terminal engine (prompt 06) → Compose
-   renderer. Input flows the reverse way. No terminal content is logged.
+   renderer. Input flows the reverse way. Terminal content is
+   not logged by default. The one exception is the opt-in
+   per-host session log (transcript): when the user enables
+   it for a host, lines that scroll into history are scrubbed
+   by the secret redactor before being appended to a private
+   on-device file (256 KB cap, single rotated generation).
+   A transcript leaves the device only inside an encrypted
+   backup, and only when the host also opts into that.
 5. SFTP bytes flow through streams with progress/cancellation tokens;
    local files go through Storage Access Framework, never through a
    blanket storage permission the app does not need.
@@ -43,10 +50,11 @@ Every protocol sits behind an interface with at least: connect, disconnect,
 liveness/error state, cancellation, and timeout configuration. The SSH
 implementation (sshj, ADR-03) is one implementation of `SshTransport`;
 SFTP is obtained from the same authenticated session, not from a second
-unauthenticated connection. RDP and VNC each get their own interface
-implementation behind `RemoteDesktopTransport` only after their POC gates
-pass — until then, their UI entry points are labelled unavailable, never
-wired to a stub that pretends to connect.
+unauthenticated connection. VNC is implemented directly as `RfbSession`
+(transport/RfbConnection.kt); there is no shared remote-desktop
+transport interface. RDP has no implementation — its POC gate did not
+pass (docs/RDP_FEASIBILITY.md) — and its UI entry points are labelled
+unavailable, never wired to a stub that pretends to connect.
 
 ## Security boundaries
 
@@ -66,8 +74,10 @@ wired to a stub that pretends to connect.
 
 ## Lifecycle ownership
 
-- One `SessionManager` owns active sessions; screens observe, they do
-  not own.
+- There is no central session manager: active sessions are owned
+  by their ViewModels (`SessionViewModel` for the terminal session),
+  never by composables; screens observe state, they do not own
+  transport internals.
 - Transport work runs off the main thread (coroutines, structured
   concurrency, cancellation propagated to the transport).
 - On process death, sessions are dead: the app must re-authenticate and

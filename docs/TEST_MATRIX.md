@@ -1,7 +1,8 @@
 # TermBridge — Test Matrix
 
 Refreshed 2026-11-04 (R-04 accuracy pass), counts
-re-refreshed the same day after the G7 wave. The prompt-15 original and its prompt-18
+re-refreshed the same day after the G7 wave, and again
+on 2026-11-06 after the audit-#3 fix wave. The prompt-15 original and its prompt-18
 additions described a tree that had never run; that is no
 longer true, so the matrix is rewritten rather than appended
 to. Status key: `RUN` = executed with the stated result;
@@ -11,11 +12,11 @@ its fixture is not configured; `MANUAL` = a device checklist
 item, not an automated test; `BLOCKED` = cannot run until
 the named prerequisite exists.
 
-## Counts (by @Test annotation, grep recount 2026-11-04, post-G7)
+## Counts (by @Test annotation, grep recount 2026-11-06, post audit-#3 fix wave)
 
-- JVM unit tests: 480 methods in 66 files (`app/src/test/`).
+- JVM unit tests: 510 methods in 66 files (`app/src/test/`).
   All run and pass locally (`tests/local/local-check.sh`,
-  OK (480 tests) read from the JUnit log, 2026-11-04) and in
+  OK (510 tests) read from the JUnit log, 2026-11-06) and in
   CI. This includes the JVM-side RfbLiveTest (2), which
   ASSUME-SKIPs unless TB_VNC_* is set — the CI `vnc` job
   (item F-03a) is the one place it runs live.
@@ -33,13 +34,13 @@ the named prerequisite exists.
   - `RfbIntegrationTest` (2): ASSUME-SKIP unless a VNC
     fixture is configured; not run in the emulator job
     (item F-03a — the live VNC proof is the JVM test above).
-- Total written: 510 methods.
+- Total written: 540 methods.
 
 ## Matrix
 
 | Area | JVM unit tests (all RUN, passing) | Instrumented / manual | Status |
 |---|---|---|---|
-| Host CRUD + encrypted credential persistence | HostRepositoryTest (12), HostValidatorTest (7) | KeystoreAndRoomTest (4) | JVM RUN; instrumented RUN in CI |
+| Host CRUD + encrypted credential persistence | HostRepositoryTest (16), HostValidatorTest (12 — incl. IDN/punycode hostname conversion and overlong-converted-name rejection) | KeystoreAndRoomTest (4) | JVM RUN; instrumented RUN in CI |
 | Host-key first trust, rejection, changed key | HostKeyTrustTest (5), SshTransportTest (policy cases) | SshIntegrationTest: unknown-host flow RUN in CI; changed-key flow IGNORED (tier-2) | Partial: changed-key integration open (R-03) |
 | SSH password/key auth, wrong creds, timeout, cancellation, disconnect | SshTransportTest (9), SshKeyLoadTest (1) | SshIntegrationTest: handshake, key auth, wrong creds, disconnect/cancel | RUN in CI against the fixture |
 | Interactive shell input/output, Ctrl-C, large output, reconnect | VtParserTest (14), TerminalScrollTest (7) | SshIntegrationTest: shell streaming | JVM + integration RUN; large-output + reconnect device proof MANUAL |
@@ -48,7 +49,10 @@ the named prerequisite exists.
 | Environment/path validation + server-specific behaviour | EnvironmentValidatorTest (12), HostEnvironmentRepositoryTest (12), CdCommandTest (5), WindowsPathTest (9) | SshIntegrationTest: env accepted/rejected, terminal + SFTP start directory | JVM + integration RUN; OpenSSH AcceptEnv behaviour on real servers MANUAL (see F-02) |
 | Tunnels / jump / proxy | AdvancedValidationTest (18), AdvancedRepositoryTest (8) | SshIntegrationTest forwarding cases | JVM RUN; integration IGNORED (tier-2, R-03) |
 | Import/export: invalid files, preview, round-trip, secret handling | BackupCodecTest (15), BackupServiceTest (8), BackupReplaceAtomicityTest (2), ExportCryptoTest (6) | None (SAF I/O reuses the picker pattern) | JVM RUN; on-device SAF round-trip MANUAL (F-04) |
-| Settings, app lock, quick connect, discovery, history | AppSettingsTest (5), PinLockTest (4), Phase2Test (9: QuickConnectTest, SubnetPlannerTest, ConnectionLogCodecTest) | CryptoProviderTest (2), MainActivitySmokeTest (1) | RUN |
+| Settings, app lock, quick connect, discovery, history | AppSettingsTest (5), PinLockTest (7 — incl. current/legacy KDF cost verification and the legacy-hash migration path), Phase2Test (9: QuickConnectTest, SubnetPlannerTest, ConnectionLogCodecTest) | CryptoProviderTest (2), MainActivitySmokeTest (1) | RUN |
+| Declared-shell vs probed-OS mismatch warning | ShellMismatchTest (6: family derivation both directions, matching-family negatives, failed probe never warns) | None | RUN |
+| Session transcripts + purge paths | TranscriptLogTest (4: append under cap, rotation at cap, tail keeps newest whole lines), HostRepositoryTest transcript cases (deleting a host purges its transcripts; a purge failure cannot fail the deletion) | Device transcript check is part of the F-04 plan | JVM RUN; the Settings command-history purge wiring (purge on toggle-off + explicit clear action, A-12) has no dedicated unit test — compile-proven only |
+| In-app update checker (GitHub releases/latest) | AppUpdateCheckerTest (14: version-comparison matrix, payload verdicts on the real published shape — tag + `TermBridge-release.apk` asset — missing/malformed payload → check-failed) | None (a live check needs a publicly readable release; the repo is private) | JVM RUN |
 | RDP / VNC protocol + session | RfbAuthTest (6), RfbDecoderTest (16), RfbMessagesTest (10), RfbConnectionTest (4, loopback peer = sequencing proof only), RfbKeysTest (4) | RfbIntegrationTest (2) | JVM RUN; real-server integration ASSUME-SKIP, not run in CI (F-03a); RDP has no implementation (F-03c) |
 | App restart, rotation, process recreation, offline, background/foreground | None automated | Prompt-14 manual checklist §5 (MOBILE_UX_NOTES.md) | MANUAL, BLOCKED on device (R-08) |
 | Accessibility, navigation, layout regression | RoutesTest (3), ToolchainSmokeTest (1) | MainActivitySmokeTest (1); prompt-14 checklist (TalkBack, largest font, dark theme) | JVM + smoke RUN; device checks MANUAL (Q-04) |

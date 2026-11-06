@@ -116,7 +116,10 @@ class TermBridgeApplication : Application() {
             hostEnvVarDao = database.hostEnvVarDao(),
             advancedRepository = advancedRepository,
             transactionRunner = transactionRunner,
-            keychainDao = database.keychainDao()
+            keychainDao = database.keychainDao(),
+            // Audit #3 (A-05): deleting a host purges its
+            // session transcripts.
+            transcriptStorage = transcriptStore
         )
     }
 

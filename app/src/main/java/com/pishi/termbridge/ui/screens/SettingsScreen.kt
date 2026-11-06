@@ -1,8 +1,11 @@
 package com.pishi.termbridge.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -12,23 +15,31 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -37,19 +48,28 @@ import androidx.compose.ui.unit.dp
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AppSettings
 import com.pishi.termbridge.domain.AppSettingsRules
+import com.pishi.termbridge.domain.AppUpdateChecker
+import com.pishi.termbridge.domain.GitHubLatestReleaseFetcher
 import com.pishi.termbridge.domain.LockMethod
 import com.pishi.termbridge.domain.PatternLock
 import com.pishi.termbridge.domain.scrollbackMemoryEstimateBytes
 import com.pishi.termbridge.domain.TerminalThemes
+import com.pishi.termbridge.domain.UpdateCheckResult
 import com.pishi.termbridge.ui.LockSettingsUi
 import com.pishi.termbridge.ui.theme.Spacing
 import com.pishi.termbridge.ui.theme.TermBridgeTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Settings, grouped like the screens people already know from other
  * terminal apps: Terminal, Session, Security & privacy, then data and
- * support. Every control here persists AND changes behaviour; nothing
- * is decorative. [onChange] receives a transform so two quick taps
+ * support. The groups are an accordion — exactly one section is
+ * expanded at a time — but that is a pure container change: every
+ * control here persists AND changes behaviour; nothing is
+ * decorative. [onChange] receives a transform so two quick taps
  * can never overwrite each other with a stale copy.
  */
 @Composable
@@ -62,259 +82,349 @@ fun SettingsScreen(
     onBackup: () -> Unit = {},
     customThemes: List<com.pishi.termbridge.domain.TerminalTheme> = emptyList(),
     onEditCustomThemes: () -> Unit = {},
+    onClearCommandHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var scrollbackDialogOpen by remember { mutableStateOf(false) }
+    var clearHistoryConfirmOpen by remember { mutableStateOf(false) }
+    var historyJustCleared by remember { mutableStateOf(false) }
+    // Accordion state: the index of the one expanded section
+    // (0 Terminal, 1 Session, 2 Lock, 3 Security, 4 Data,
+    // 5 App update). Tapping a collapsed header expands it and
+    // collapses the others; the expanded header is inert, so
+    // exactly one section is open at all times.
+    var expandedSection by rememberSaveable { mutableStateOf(0) }
+    LaunchedEffect(historyJustCleared) {
+        if (historyJustCleared) {
+            delay(3_000)
+            historyJustCleared = false
+        }
+    }
+    if (clearHistoryConfirmOpen) {
+        AlertDialog(
+            onDismissRequest = { clearHistoryConfirmOpen = false },
+            title = { Text(stringResource(R.string.settings_clear_history_title)) },
+            text = { Text(stringResource(R.string.settings_clear_history_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearCommandHistory()
+                        clearHistoryConfirmOpen = false
+                        historyJustCleared = true
+                    }
+                ) { Text(stringResource(R.string.action_delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearHistoryConfirmOpen = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(vertical = Spacing.small)
     ) {
-        SectionHeader(stringResource(R.string.settings_section_terminal))
-        StepperRow(
-            title = stringResource(R.string.settings_font_size),
-            value = stringResource(R.string.settings_font_size_value, settings.terminalFontSp),
-            onMinus = { onChange { it.copy(terminalFontSp = it.terminalFontSp - 1) } },
-            onPlus = { onChange { it.copy(terminalFontSp = it.terminalFontSp + 1) } },
-            minusLabel = stringResource(R.string.settings_font_smaller),
-            plusLabel = stringResource(R.string.settings_font_larger)
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_scrollback),
-            value = stringResource(
-                R.string.settings_scrollback_value, settings.scrollbackLines
-            ) + " · " + stringResource(
-                R.string.settings_scrollback_estimate,
-                formatBytesShort(scrollbackMemoryEstimateBytes(settings.scrollbackLines))
-            ),
-            hint = stringResource(R.string.settings_scrollback_hint),
-            onClick = { scrollbackDialogOpen = true }
-        )
-        if (scrollbackDialogOpen) {
-            ScrollbackDialog(
-                current = settings.scrollbackLines,
-                onDismiss = { scrollbackDialogOpen = false },
-                onSave = { lines ->
-                    onChange { it.copy(scrollbackLines = lines) }
-                    scrollbackDialogOpen = false
+        AccordionSection(
+            title = stringResource(R.string.settings_section_terminal),
+            expanded = expandedSection == 0,
+            onToggle = { expandedSection = 0 }
+        ) {
+            StepperRow(
+                title = stringResource(R.string.settings_font_size),
+                value = stringResource(R.string.settings_font_size_value, settings.terminalFontSp),
+                onMinus = { onChange { it.copy(terminalFontSp = it.terminalFontSp - 1) } },
+                onPlus = { onChange { it.copy(terminalFontSp = it.terminalFontSp + 1) } },
+                minusLabel = stringResource(R.string.settings_font_smaller),
+                plusLabel = stringResource(R.string.settings_font_larger)
+            )
+            ChoiceRow(
+                title = stringResource(R.string.settings_scrollback),
+                value = stringResource(
+                    R.string.settings_scrollback_value, settings.scrollbackLines
+                ) + " · " + stringResource(
+                    R.string.settings_scrollback_estimate,
+                    formatBytesShort(scrollbackMemoryEstimateBytes(settings.scrollbackLines))
+                ),
+                hint = stringResource(R.string.settings_scrollback_hint),
+                onClick = { scrollbackDialogOpen = true }
+            )
+            if (scrollbackDialogOpen) {
+                ScrollbackDialog(
+                    current = settings.scrollbackLines,
+                    onDismiss = { scrollbackDialogOpen = false },
+                    onSave = { lines ->
+                        onChange { it.copy(scrollbackLines = lines) }
+                        scrollbackDialogOpen = false
+                    }
+                )
+            }
+            ChoiceRow(
+                title = stringResource(R.string.settings_terminal_type),
+                value = settings.terminalType,
+                hint = stringResource(R.string.settings_terminal_type_hint),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            terminalType = AppSettingsRules.next(
+                                AppSettings.TERMINAL_TYPES, it.terminalType
+                            )
+                        )
+                    }
+                }
+            )
+            ChoiceRow(
+                title = stringResource(R.string.settings_terminal_theme),
+                value = TerminalThemes.resolve(settings.terminalTheme, customThemes).label,
+                onClick = {
+                    onChange {
+                        val ids = TerminalThemes.all.map { t -> t.id } +
+                            customThemes.map { t -> t.id }
+                        it.copy(terminalTheme = AppSettingsRules.next(ids, it.terminalTheme))
+                    }
+                }
+            )
+            LinkRow(stringResource(R.string.settings_custom_themes), onEditCustomThemes)
+            ChoiceRow(
+                title = stringResource(R.string.settings_cursor_style),
+                value = stringResource(
+                    when (settings.cursorStyle) {
+                        AppSettings.CURSOR_STYLE_UNDERLINE -> R.string.settings_cursor_underline
+                        AppSettings.CURSOR_STYLE_BAR -> R.string.settings_cursor_bar
+                        else -> R.string.settings_cursor_block
+                    }
+                ),
+                hint = stringResource(R.string.settings_cursor_hint),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            cursorStyle = AppSettingsRules.next(
+                                AppSettings.CURSOR_STYLES, it.cursorStyle
+                            )
+                        )
+                    }
+                }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_cursor_blink),
+                hint = stringResource(R.string.settings_cursor_blink_hint),
+                checked = settings.cursorBlink,
+                onCheckedChange = { checked -> onChange { it.copy(cursorBlink = checked) } }
+            )
+            ChoiceRow(
+                title = stringResource(R.string.settings_scroll_sensitivity),
+                value = stringResource(
+                    R.string.settings_scroll_sensitivity_value,
+                    settings.scrollSensitivity.toString()
+                ),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            scrollSensitivity = AppSettingsRules.next(
+                                AppSettings.SCROLL_SENSITIVITIES, it.scrollSensitivity
+                            )
+                        )
+                    }
+                }
+            )
+            // Hardware actions (item T-19), both default to Disabled.
+            ChoiceRow(
+                title = stringResource(R.string.settings_volume_keys),
+                value = stringResource(
+                    when (settings.volumeKeyAction) {
+                        com.pishi.termbridge.domain.VolumeKeyAction.FONT_SIZE.id ->
+                            R.string.volume_action_font
+                        com.pishi.termbridge.domain.VolumeKeyAction.CTRL_MODIFIER.id ->
+                            R.string.volume_action_ctrl
+                        com.pishi.termbridge.domain.VolumeKeyAction.SCROLL.id ->
+                            R.string.volume_action_scroll
+                        com.pishi.termbridge.domain.VolumeKeyAction.SEND_KEY.id ->
+                            R.string.volume_action_key
+                        else -> R.string.volume_action_disabled
+                    }
+                ),
+                hint = stringResource(R.string.settings_volume_keys_hint),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            volumeKeyAction = AppSettingsRules.next(
+                                com.pishi.termbridge.domain.VolumeKeyAction.IDS,
+                                it.volumeKeyAction
+                            )
+                        )
+                    }
+                }
+            )
+            ChoiceRow(
+                title = stringResource(R.string.settings_shake),
+                value = stringResource(
+                    when (settings.shakeAction) {
+                        com.pishi.termbridge.domain.ShakeAction.CLEAR_SCREEN.id ->
+                            R.string.shake_action_clear
+                        com.pishi.termbridge.domain.ShakeAction.DISCONNECT.id ->
+                            R.string.shake_action_disconnect
+                        else -> R.string.shake_action_disabled
+                    }
+                ),
+                hint = stringResource(R.string.settings_shake_hint),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            shakeAction = AppSettingsRules.next(
+                                com.pishi.termbridge.domain.ShakeAction.IDS,
+                                it.shakeAction
+                            )
+                        )
+                    }
+                }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_bell_haptic),
+                hint = stringResource(R.string.settings_bell_haptic_hint),
+                checked = settings.bellHaptic,
+                onCheckedChange = { checked -> onChange { it.copy(bellHaptic = checked) } }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_extra_keys_bar),
+                hint = stringResource(R.string.settings_extra_keys_bar_hint),
+                checked = settings.showExtraKeysBar,
+                onCheckedChange = { checked -> onChange { it.copy(showExtraKeysBar = checked) } }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_autocomplete),
+                hint = stringResource(R.string.settings_autocomplete_hint),
+                checked = settings.autocompleteEnabled,
+                onCheckedChange = { checked ->
+                    // Audit #3 (A-12): turning suggestions off
+                    // also purges the remembered commands — off
+                    // must mean nothing is kept, not just that
+                    // nothing new is learned.
+                    if (!checked) onClearCommandHistory()
+                    onChange { it.copy(autocompleteEnabled = checked) }
+                }
+            )
+            LinkRow(
+                stringResource(R.string.settings_clear_history),
+                onClick = { clearHistoryConfirmOpen = true }
+            )
+            if (historyJustCleared) {
+                Text(
+                    text = stringResource(R.string.settings_history_cleared),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(
+                        horizontal = Spacing.medium, vertical = 8.dp
+                    )
+                )
+            }
+            SwitchRow(
+                title = stringResource(R.string.settings_detect_os),
+                hint = stringResource(R.string.settings_detect_os_hint),
+                checked = settings.detectOsOnConnect,
+                onCheckedChange = { checked -> onChange { it.copy(detectOsOnConnect = checked) } }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_bell_sound),
+                hint = stringResource(R.string.settings_bell_sound_hint),
+                checked = settings.bellSound,
+                onCheckedChange = { checked -> onChange { it.copy(bellSound = checked) } }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_bell_flash),
+                hint = stringResource(R.string.settings_bell_flash_hint),
+                checked = settings.bellFlash,
+                onCheckedChange = { checked -> onChange { it.copy(bellFlash = checked) } }
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_keep_screen_on),
+                hint = stringResource(R.string.settings_keep_screen_on_hint),
+                checked = settings.keepScreenOn,
+                onCheckedChange = { checked -> onChange { it.copy(keepScreenOn = checked) } }
+            )
+        }
+
+        AccordionSection(
+            title = stringResource(R.string.settings_section_session),
+            expanded = expandedSection == 1,
+            onToggle = { expandedSection = 1 }
+        ) {
+            ChoiceRow(
+                title = stringResource(R.string.settings_keepalive),
+                value = if (settings.keepAliveSeconds == 0) {
+                    stringResource(R.string.settings_keepalive_off)
+                } else {
+                    stringResource(R.string.settings_keepalive_value, settings.keepAliveSeconds)
+                },
+                hint = stringResource(R.string.settings_keepalive_hint),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            keepAliveSeconds = AppSettingsRules.next(
+                                AppSettings.KEEPALIVE_CHOICES, it.keepAliveSeconds
+                            )
+                        )
+                    }
+                }
+            )
+            ChoiceRow(
+                title = stringResource(R.string.settings_keepalive_misses),
+                value = stringResource(
+                    R.string.settings_keepalive_misses_value, settings.keepAliveMaxMisses
+                ),
+                hint = stringResource(R.string.settings_keepalive_misses_hint),
+                onClick = {
+                    onChange {
+                        it.copy(
+                            keepAliveMaxMisses = AppSettingsRules.next(
+                                AppSettings.KEEPALIVE_MAX_MISS_CHOICES, it.keepAliveMaxMisses
+                            )
+                        )
+                    }
                 }
             )
         }
-        ChoiceRow(
-            title = stringResource(R.string.settings_terminal_type),
-            value = settings.terminalType,
-            hint = stringResource(R.string.settings_terminal_type_hint),
-            onClick = {
-                onChange {
-                    it.copy(
-                        terminalType = AppSettingsRules.next(
-                            AppSettings.TERMINAL_TYPES, it.terminalType
-                        )
-                    )
-                }
-            }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_terminal_theme),
-            value = TerminalThemes.resolve(settings.terminalTheme, customThemes).label,
-            onClick = {
-                onChange {
-                    val ids = TerminalThemes.all.map { t -> t.id } +
-                        customThemes.map { t -> t.id }
-                    it.copy(terminalTheme = AppSettingsRules.next(ids, it.terminalTheme))
-                }
-            }
-        )
-        LinkRow(stringResource(R.string.settings_custom_themes), onEditCustomThemes)
-        ChoiceRow(
-            title = stringResource(R.string.settings_cursor_style),
-            value = stringResource(
-                when (settings.cursorStyle) {
-                    AppSettings.CURSOR_STYLE_UNDERLINE -> R.string.settings_cursor_underline
-                    AppSettings.CURSOR_STYLE_BAR -> R.string.settings_cursor_bar
-                    else -> R.string.settings_cursor_block
-                }
-            ),
-            hint = stringResource(R.string.settings_cursor_hint),
-            onClick = {
-                onChange {
-                    it.copy(
-                        cursorStyle = AppSettingsRules.next(
-                            AppSettings.CURSOR_STYLES, it.cursorStyle
-                        )
-                    )
-                }
-            }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_cursor_blink),
-            hint = stringResource(R.string.settings_cursor_blink_hint),
-            checked = settings.cursorBlink,
-            onCheckedChange = { checked -> onChange { it.copy(cursorBlink = checked) } }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_scroll_sensitivity),
-            value = stringResource(
-                R.string.settings_scroll_sensitivity_value,
-                settings.scrollSensitivity.toString()
-            ),
-            onClick = {
-                onChange {
-                    it.copy(
-                        scrollSensitivity = AppSettingsRules.next(
-                            AppSettings.SCROLL_SENSITIVITIES, it.scrollSensitivity
-                        )
-                    )
-                }
-            }
-        )
-        // Hardware actions (item T-19), both default to Disabled.
-        ChoiceRow(
-            title = stringResource(R.string.settings_volume_keys),
-            value = stringResource(
-                when (settings.volumeKeyAction) {
-                    com.pishi.termbridge.domain.VolumeKeyAction.FONT_SIZE.id ->
-                        R.string.volume_action_font
-                    com.pishi.termbridge.domain.VolumeKeyAction.CTRL_MODIFIER.id ->
-                        R.string.volume_action_ctrl
-                    com.pishi.termbridge.domain.VolumeKeyAction.SCROLL.id ->
-                        R.string.volume_action_scroll
-                    com.pishi.termbridge.domain.VolumeKeyAction.SEND_KEY.id ->
-                        R.string.volume_action_key
-                    else -> R.string.volume_action_disabled
-                }
-            ),
-            hint = stringResource(R.string.settings_volume_keys_hint),
-            onClick = {
-                onChange {
-                    it.copy(
-                        volumeKeyAction = AppSettingsRules.next(
-                            com.pishi.termbridge.domain.VolumeKeyAction.IDS,
-                            it.volumeKeyAction
-                        )
-                    )
-                }
-            }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_shake),
-            value = stringResource(
-                when (settings.shakeAction) {
-                    com.pishi.termbridge.domain.ShakeAction.CLEAR_SCREEN.id ->
-                        R.string.shake_action_clear
-                    com.pishi.termbridge.domain.ShakeAction.DISCONNECT.id ->
-                        R.string.shake_action_disconnect
-                    else -> R.string.shake_action_disabled
-                }
-            ),
-            hint = stringResource(R.string.settings_shake_hint),
-            onClick = {
-                onChange {
-                    it.copy(
-                        shakeAction = AppSettingsRules.next(
-                            com.pishi.termbridge.domain.ShakeAction.IDS,
-                            it.shakeAction
-                        )
-                    )
-                }
-            }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_bell_haptic),
-            hint = stringResource(R.string.settings_bell_haptic_hint),
-            checked = settings.bellHaptic,
-            onCheckedChange = { checked -> onChange { it.copy(bellHaptic = checked) } }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_extra_keys_bar),
-            hint = stringResource(R.string.settings_extra_keys_bar_hint),
-            checked = settings.showExtraKeysBar,
-            onCheckedChange = { checked -> onChange { it.copy(showExtraKeysBar = checked) } }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_autocomplete),
-            hint = stringResource(R.string.settings_autocomplete_hint),
-            checked = settings.autocompleteEnabled,
-            onCheckedChange = { checked -> onChange { it.copy(autocompleteEnabled = checked) } }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_detect_os),
-            hint = stringResource(R.string.settings_detect_os_hint),
-            checked = settings.detectOsOnConnect,
-            onCheckedChange = { checked -> onChange { it.copy(detectOsOnConnect = checked) } }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_bell_sound),
-            hint = stringResource(R.string.settings_bell_sound_hint),
-            checked = settings.bellSound,
-            onCheckedChange = { checked -> onChange { it.copy(bellSound = checked) } }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_bell_flash),
-            hint = stringResource(R.string.settings_bell_flash_hint),
-            checked = settings.bellFlash,
-            onCheckedChange = { checked -> onChange { it.copy(bellFlash = checked) } }
-        )
-        SwitchRow(
-            title = stringResource(R.string.settings_keep_screen_on),
-            hint = stringResource(R.string.settings_keep_screen_on_hint),
-            checked = settings.keepScreenOn,
-            onCheckedChange = { checked -> onChange { it.copy(keepScreenOn = checked) } }
-        )
 
-        SectionHeader(stringResource(R.string.settings_section_session))
-        ChoiceRow(
-            title = stringResource(R.string.settings_keepalive),
-            value = if (settings.keepAliveSeconds == 0) {
-                stringResource(R.string.settings_keepalive_off)
-            } else {
-                stringResource(R.string.settings_keepalive_value, settings.keepAliveSeconds)
-            },
-            hint = stringResource(R.string.settings_keepalive_hint),
-            onClick = {
-                onChange {
-                    it.copy(
-                        keepAliveSeconds = AppSettingsRules.next(
-                            AppSettings.KEEPALIVE_CHOICES, it.keepAliveSeconds
-                        )
-                    )
-                }
-            }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_keepalive_misses),
-            value = stringResource(
-                R.string.settings_keepalive_misses_value, settings.keepAliveMaxMisses
-            ),
-            hint = stringResource(R.string.settings_keepalive_misses_hint),
-            onClick = {
-                onChange {
-                    it.copy(
-                        keepAliveMaxMisses = AppSettingsRules.next(
-                            AppSettings.KEEPALIVE_MAX_MISS_CHOICES, it.keepAliveMaxMisses
-                        )
-                    )
-                }
-            }
-        )
+        AccordionSection(
+            title = stringResource(R.string.settings_section_lock),
+            expanded = expandedSection == 2,
+            onToggle = { expandedSection = 2 }
+        ) {
+            LockSection(lock)
+        }
 
-        SectionHeader(stringResource(R.string.settings_section_lock))
-        LockSection(lock)
+        AccordionSection(
+            title = stringResource(R.string.settings_section_security),
+            expanded = expandedSection == 3,
+            onToggle = { expandedSection = 3 }
+        ) {
+            SwitchRow(
+                title = stringResource(R.string.settings_block_screenshots),
+                hint = stringResource(R.string.settings_block_screenshots_hint),
+                checked = settings.blockScreenshots,
+                onCheckedChange = { checked -> onChange { it.copy(blockScreenshots = checked) } }
+            )
+        }
 
-        SectionHeader(stringResource(R.string.settings_section_security))
-        SwitchRow(
-            title = stringResource(R.string.settings_block_screenshots),
-            hint = stringResource(R.string.settings_block_screenshots_hint),
-            checked = settings.blockScreenshots,
-            onCheckedChange = { checked -> onChange { it.copy(blockScreenshots = checked) } }
-        )
+        AccordionSection(
+            title = stringResource(R.string.settings_section_data),
+            expanded = expandedSection == 4,
+            onToggle = { expandedSection = 4 }
+        ) {
+            LinkRow(stringResource(R.string.action_backup), onBackup)
+            LinkRow(stringResource(R.string.action_diagnostics), onDiagnostics)
+            LinkRow(stringResource(R.string.action_about), onAbout)
+            Spacer(modifier = Modifier.height(Spacing.large))
+        }
 
-        SectionHeader(stringResource(R.string.settings_section_data))
-        LinkRow(stringResource(R.string.action_backup), onBackup)
-        LinkRow(stringResource(R.string.action_diagnostics), onDiagnostics)
-        LinkRow(stringResource(R.string.action_about), onAbout)
-        Spacer(modifier = Modifier.height(Spacing.large))
+        AccordionSection(
+            title = stringResource(R.string.settings_section_update),
+            expanded = expandedSection == 5,
+            onToggle = { expandedSection = 5 }
+        ) {
+            AppUpdateBlock()
+        }
     }
 }
 
@@ -395,16 +505,137 @@ private fun ScrollbackDialog(
     )
 }
 
+/**
+ * One accordion panel: a tappable header (section title +
+ * chevron) and, only while [expanded], the section content.
+ * The parent owns which section is expanded, so exactly one
+ * panel is open at a time.
+ */
 @Composable
-private fun SectionHeader(text: String) {
+private fun AccordionSection(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = Spacing.medium, vertical = Spacing.medium),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = stringResource(
+                if (expanded) {
+                    R.string.settings_collapse_section
+                } else {
+                    R.string.settings_expand_section
+                }
+            ),
+            tint = MaterialTheme.colorScheme.primary
+        )
+    }
+    if (expanded) {
+        Column(content = content)
+    }
+}
+
+private sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data object Checking : UpdateUiState
+    data class Done(val result: UpdateCheckResult) : UpdateUiState
+}
+
+/**
+ * The App update section body: the running version (read from
+ * PackageManager, never hardcoded), a manual check button and
+ * its result. Manual only — no background polling — and an
+ * available update is offered as a browser download link; the
+ * app holds no install permission and never fetches the APK.
+ */
+@Composable
+private fun AppUpdateBlock() {
+    val context = LocalContext.current
+    val currentVersion = remember {
+        try {
+            context.packageManager
+                .getPackageInfo(context.packageName, 0).versionName ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    val scope = rememberCoroutineScope()
+    SettingRow {
+        TitleAndHint(
+            stringResource(R.string.update_current_version), null, Modifier.weight(1f)
+        )
+        Text(
+            text = currentVersion,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+    LinkRow(
+        title = stringResource(R.string.update_check_action),
+        onClick = {
+            if (updateState != UpdateUiState.Checking) {
+                updateState = UpdateUiState.Checking
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        AppUpdateChecker.check(currentVersion, GitHubLatestReleaseFetcher())
+                    }
+                    updateState = UpdateUiState.Done(result)
+                }
+            }
+        }
+    )
+    when (val state = updateState) {
+        UpdateUiState.Idle -> Unit
+        UpdateUiState.Checking ->
+            UpdateStatusText(stringResource(R.string.update_checking))
+        is UpdateUiState.Done -> when (val result = state.result) {
+            UpdateCheckResult.UpToDate ->
+                UpdateStatusText(stringResource(R.string.update_up_to_date))
+            UpdateCheckResult.CheckFailed ->
+                UpdateStatusText(stringResource(R.string.update_check_failed))
+            is UpdateCheckResult.UpdateAvailable -> {
+                UpdateStatusText(
+                    stringResource(R.string.update_available, result.tag)
+                )
+                LinkRow(
+                    title = stringResource(R.string.update_download_action),
+                    onClick = {
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(result.downloadUrl))
+                            )
+                        } catch (_: Exception) {
+                            // No browser to open it with — the
+                            // version line above still tells
+                            // the user an update exists.
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateStatusText(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(
-            start = Spacing.medium, end = Spacing.medium,
-            top = Spacing.large, bottom = Spacing.small
-        )
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(horizontal = Spacing.medium, vertical = 12.dp)
     )
 }
 

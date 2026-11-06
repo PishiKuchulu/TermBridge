@@ -105,9 +105,29 @@ class AppLockStore(context: Context) {
         if (now < until) return UnlockResult.Throttled(until - now)
         val salt = prefs.getString(K_SALT, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
         val hash = prefs.getString(K_HASH, null)
-        if (salt == null || hash == null) return UnlockResult.Success
+        // Audit #3 (A-22): fail CLOSED. A missing salt or hash
+        // means the stored lock material is damaged; this used
+        // to return Success, so a lost salt silently opened
+        // the app. (When the hash is gone entirely the lock
+        // also reports itself disabled, so this branch is the
+        // salt-loss case in practice.)
+        if (salt == null || hash == null) return UnlockResult.Wrong
         if (PinLock.verify(secret, salt, hash)) {
             prefs.edit().putInt(K_FAILS, 0).putLong(K_UNTIL, 0L).apply()
+            return UnlockResult.Success
+        }
+        // Audit #3 (A-23): hashes stored before the KDF cost
+        // was raised to 600,000 were computed at the legacy
+        // 120,000, and the count is not stored with the hash —
+        // retry at the legacy cost. On a legacy success,
+        // transparently re-hash at the current cost (same salt)
+        // so later unlocks take the primary path above.
+        if (PinLock.verify(secret, salt, hash, PinLock.LEGACY_ITERATIONS)) {
+            prefs.edit()
+                .putString(K_HASH, PinLock.hash(secret, salt))
+                .putInt(K_FAILS, 0)
+                .putLong(K_UNTIL, 0L)
+                .apply()
             return UnlockResult.Success
         }
         val fails = prefs.getInt(K_FAILS, 0) + 1
