@@ -82,6 +82,13 @@ android {
             // it cannot change runtime behaviour).
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            // Audit #3 A-19 follow-up (Android CI run #70, 2026-11-06):
+            // Bouncy Castle 1.85 ships META-INF/LICENSE.md in each of
+            // bcprov, bcpkix and bcutil, and the build fails with
+            // DuplicateRelativeFileException before any test or APK
+            // step. The license files are identical notices, unused
+            // at runtime, so excluding the duplicate is safe.
+            excludes += "META-INF/LICENSE.md"
         }
     }
 }
