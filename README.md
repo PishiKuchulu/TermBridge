@@ -8,18 +8,29 @@ command buttons, per-host environment settings, SSH tunnels
 import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
-**Status: in active development, NOT a release.** Version
-`0.1.0-foundation` (versionCode 1), database v10. CI went
+**Status: signed releases ship from this tree.** Version
+`0.1.1-foundation` (versionCode 2), database v10. CI went
 green for the first time on 2026-10-25 (run #13: unit tests
 + debug assemble + emulator instrumented tests). Since then:
 the 9-phase security remediation and the review-2 fix wave
-landed (see `docs/REVIEW_2_REMEDIATION.md`), and four
+landed (see `docs/REVIEW_2_REMEDIATION.md`), four
 Termius-parity phases added settings/themes, Vault
 navigation, an app lock and a VNC screen (see
-`docs/PARITY_PHASES.md`) — but signing, device runs, and
-tier-2 integration tests are still open, so this is still
-not a release. See `docs/RELEASE_NOTES.md` for the release
-gates. Nothing in this file claims otherwise.
+`docs/PARITY_PHASES.md`), and signed releases v0.1.0 /
+v0.1.1 were published from tags (signature verified against
+the release keystore). Still open: on-device verification
+runs and tier-2 integration tests. See
+`docs/RELEASE_NOTES.md` for the release gates.
+
+**At-rest scope (audit #6 TB-010):** "Keystore-encrypted"
+covers credentials, keychain keys and environment-variable
+VALUES. Host names, usernames, env-var names, command-button
+templates, tunnel definitions, session transcripts and the
+connection log are stored unencrypted in app-private storage
+(protected by Android's per-app sandbox and
+`allowBackup=false`, not by cryptography). The threat model
+treats a compromised/unlocked device as out of scope; see
+`docs/SECURITY_KEY_LIFECYCLE.md`.
 
 ## What works (evidence labels in docs/PARITY_PHASES.md and the phase reports)
 
@@ -82,7 +93,11 @@ gates. Nothing in this file claims otherwise.
   a real VNC server: `RfbIntegrationTest` exists but is
   skipped in CI, so treat VNC as unverified until that
   proof lands (item F-03a in
-  `docs/PARITY_TRACEABILITY.md`).
+  `docs/PARITY_TRACEABILITY.md`). A JVM-level proof does
+  exist: the CI `vnc` job runs `RfbLiveTest` against a real
+  x11vnc server (protocol + framebuffer); what remains
+  unverified is the on-device screen and input path
+  (audit #6 TB-019).
 
 ## Build
 

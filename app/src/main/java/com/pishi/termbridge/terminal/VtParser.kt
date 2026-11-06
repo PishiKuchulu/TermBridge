@@ -32,7 +32,25 @@ data class TerminalSnapshot(
      *  until then the user's setting is the effective one. */
     val cursorStyleSetByApp: Boolean = false,
     /** CSI ?25: applications may hide the cursor. */
-    val cursorVisible: Boolean = true
+    val cursorVisible: Boolean = true,
+    /**
+     * Audit #6 TB-001: monotonic counter, bumped on every
+     * [VtParser.feed]. Snapshot lines alias the parser's live rows,
+     * so two snapshots of a repaint-only change (a progress bar
+     * redrawn at the same cursor position) would otherwise compare
+     * EQUAL as data-class values and StateFlow would conflate the
+     * update away — the frame would never reach the UI. The
+     * revision makes every fed frame distinct.
+     */
+    val revision: Long = 0,
+    /**
+     * Audit #6 TB-002: total number of scrollback lines the parser
+     * has ever trimmed at the cap. A consumer diffing snapshots by
+     * line count alone saturates at (cap + rows) and stalls;
+     * [scrollbackTrimmed] + a line's index in [lines] is the line's
+     * absolute, ever-growing position in the session's output.
+     */
+    val scrollbackTrimmed: Long = 0
 )
 
 private enum class ParserState {
@@ -93,6 +111,10 @@ class VtParser(
 
     private var screen: MutableList<MutableList<TerminalCell>> = newScreen()
     private val scrollback: MutableList<List<TerminalCell>> = mutableListOf()
+
+    // Audit #6 TB-001 / TB-002: see TerminalSnapshot's fields.
+    private var feedRevision = 0L
+    private var scrollbackTrimmedTotal = 0L
     private var cursorRow = 0
     private var cursorCol = 0
     private var savedRow = 0
@@ -157,6 +179,7 @@ class VtParser(
         MutableList(cols) { TerminalCell() }
 
     fun feed(text: String) {
+        feedRevision++
         for (ch in text) {
             when (state) {
                 ParserState.GROUND -> ground(ch)
@@ -480,6 +503,7 @@ class VtParser(
     private fun trimScrollback() {
         while (scrollback.size > maxScrollback) {
             scrollback.removeAt(0)
+            scrollbackTrimmedTotal++
         }
     }
 
@@ -553,7 +577,9 @@ class VtParser(
             cursorShape = cursorShape,
             cursorBlinking = cursorBlinking,
             cursorStyleSetByApp = cursorStyleSetByApp,
-            cursorVisible = cursorVisible
+            cursorVisible = cursorVisible,
+            revision = feedRevision,
+            scrollbackTrimmed = scrollbackTrimmedTotal
         )
     }
 }

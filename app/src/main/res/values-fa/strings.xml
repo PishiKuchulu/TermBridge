@@ -550,6 +550,7 @@
     <string name="update_up_to_date">این آخرین نسخه است.</string>
     <string name="update_available">نسخهٔ %1$s در دسترس است.</string>
     <string name="update_download_action">دانلود به‌روزرسانی</string>
+    <string name="update_unverified_note">ترم‌بریج نمی‌تواند فایل دانلودشده را راستی‌آزمایی کند. فقط اگر به منبع اعتماد دارید نصبش کنید.</string>
     <string name="update_check_failed">بررسی به‌روزرسانی ممکن نشد. بعداً دوباره تلاش کنید.</string>
     <string name="settings_clear_history">پاک کردن تاریخچهٔ فرمان‌ها</string>
     <string name="settings_clear_history_title">تاریخچهٔ فرمان‌ها پاک شود؟</string>

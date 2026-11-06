@@ -72,7 +72,10 @@ class RemoteDesktopViewModel(
 
     private var session: RfbSession? = null
     private var job: Job? = null
-    private var outbox = Channel<() -> Unit>(Channel.UNLIMITED)
+    // Audit #6 TB-006: bounded — input events produced faster
+    // than the network drains them are dropped, never queued
+    // without limit (a stale mouse move is worthless anyway).
+    private var outbox = Channel<() -> Unit>(OUTBOX_CAPACITY)
     private var bitmap: Bitmap? = null
     private var version = 0L
 
@@ -226,7 +229,7 @@ class RemoteDesktopViewModel(
             status = DesktopStatus.CONNECTED,
             desktopName = opened.desktopName
         )
-        outbox = Channel(Channel.UNLIMITED)
+        outbox = Channel(OUTBOX_CAPACITY)
         val sender = viewModelScope.launch(Dispatchers.IO) {
             for (action in outbox) {
                 try {
@@ -278,6 +281,9 @@ class RemoteDesktopViewModel(
     private companion object {
         /** Not a saved tunnel: the desktop's private forward. */
         const val SSH_TUNNEL_ID = -77L
+
+        /** Audit #6 TB-006: input outbox element bound. */
+        const val OUTBOX_CAPACITY = 512
     }
 
 

@@ -16,10 +16,12 @@ evidence that exists for it, and gives it exactly one status.
   VERIFIED.
 - `IMPLEMENTED_NOT_VERIFIED` — the code path exists and was
   statically checked (read/grepped), but no test, build, or
-  device/server run has ever executed it. This is the honest
-  status for the whole behaviour surface: the app has never
-  been built or run anywhere (no repo, no CI, sandbox Gradle
-  daemon + Java HTTPS limits unchanged).
+  device/server run has ever executed it. (Correction,
+  2026-11-06, audit #6 TB-015: the app HAS been built and run
+  in CI since 2026-10-25 — GitHub Actions is green including
+  the emulator fixture suite, and signed releases ship from
+  tags. The sentence this replaces described the pre-repo
+  handoff state.)
 - `PARTIAL` — part of the claim holds in code, part does not,
   or the claim's own acceptance criteria are unmet.
 - `MOCK_ONLY` — a demo/mock presented as behaviour. None
@@ -29,9 +31,9 @@ evidence that exists for it, and gives it exactly one status.
 - `BLOCKED` — the pack's proof gate failed; no implementation
   is offered, and a blocker report exists instead.
 
-Test counts recount by grep (2026-11-04, R-04 pass): 316 JVM
+Test counts recount by grep (2026-11-06, audit #6 fix wave): 516 JVM
 `@Test` methods — all run and pass in CI and in the local
-harness — and 29 instrumented `@Test` methods across
+harness — and 30 instrumented `@Test` methods across
 `KeystoreAndRoomTest`, `MainActivitySmokeTest`,
 `CryptoProviderTest`, `RfbIntegrationTest` and
 `SshIntegrationTest` (the tier-2 cases there remain

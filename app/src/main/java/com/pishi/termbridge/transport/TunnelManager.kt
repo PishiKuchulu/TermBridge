@@ -66,6 +66,16 @@ data class ActiveTunnel(
  */
 class SshTunnelManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Audit #6 TB-007: the four registries below are mutated from
+    // caller threads, IO bodies and the per-tunnel listen jobs
+    // with (previously) no synchronisation at all — a stop()
+    // racing a listen-loop death could lose updates or throw
+    // ConcurrentModificationException during iteration. Every
+    // access now goes through this one monitor; blocking calls
+    // (close / cancel) are made on snapshots taken under the lock,
+    // never while holding it.
+    private val registryLock = Any()
     private val localForwarders = mutableMapOf<Long, LocalPortForwarder>()
     private val localJobs = mutableMapOf<Long, Job>()
     private val remoteForwards = mutableMapOf<Long, RemotePortForwarder.Forward>()
@@ -87,7 +97,11 @@ class SshTunnelManager {
 
     suspend fun startLocal(connection: SshConnection, config: TunnelConfig): ActiveTunnel {
         val client = clientFor(connection)
-        if (localForwarders.containsKey(config.id) || remoteForwards.containsKey(config.id)) {
+        if (synchronized(registryLock) {
+                localForwarders.containsKey(config.id) ||
+                    remoteForwards.containsKey(config.id)
+            }
+        ) {
             throw TunnelException("This tunnel is already started.")
         }
         return withContext(Dispatchers.IO) {
@@ -125,8 +139,9 @@ class SshTunnelManager {
                 }
                 throw TunnelException("Could not start local forwarding.")
             }
-            localForwarders[config.id] = forwarder
-            localJobs[config.id] = scope.launch {
+            synchronized(registryLock) {
+                localForwarders[config.id] = forwarder
+                localJobs[config.id] = scope.launch {
                 try {
                     forwarder.listen()
                 } catch (_: Exception) {
@@ -140,16 +155,19 @@ class SshTunnelManager {
                     // the active list so the UI stops showing
                     // a dead forward as live. A stop() exit
                     // finds nothing registered and is ignored.
-                    if (localForwarders.containsKey(config.id)) {
-                        localForwarders.remove(config.id)
-                        localJobs.remove(config.id)
-                        activeMap.remove(config.id)
-                        refresh()
+                    synchronized(registryLock) {
+                        if (localForwarders.containsKey(config.id)) {
+                            localForwarders.remove(config.id)
+                            localJobs.remove(config.id)
+                            activeMap.remove(config.id)
+                            refresh()
+                        }
                     }
+                }
                 }
             }
             val activeTunnel = config.copy(bindPort = boundPort).toActive()
-            activeMap[config.id] = activeTunnel
+            synchronized(registryLock) { activeMap[config.id] = activeTunnel }
             refresh()
             activeTunnel
         }
@@ -157,7 +175,11 @@ class SshTunnelManager {
 
     suspend fun startRemote(connection: SshConnection, config: TunnelConfig): ActiveTunnel {
         val client = clientFor(connection)
-        if (localForwarders.containsKey(config.id) || remoteForwards.containsKey(config.id)) {
+        if (synchronized(registryLock) {
+                localForwarders.containsKey(config.id) ||
+                    remoteForwards.containsKey(config.id)
+            }
+        ) {
             throw TunnelException("This tunnel is already started.")
         }
         return withContext(Dispatchers.IO) {
@@ -175,9 +197,11 @@ class SshTunnelManager {
                         "The server may not allow remote forwarding, or the port may be in use there."
                 )
             }
-            remoteForwards[config.id] = forward
             val activeTunnel = config.toActive()
-            activeMap[config.id] = activeTunnel
+            synchronized(registryLock) {
+                remoteForwards[config.id] = forward
+                activeMap[config.id] = activeTunnel
+            }
             refresh()
             activeTunnel
         }
@@ -195,27 +219,39 @@ class SshTunnelManager {
         } catch (_: Exception) {
             null
         }
-        localForwarders.remove(configId)?.let { forwarder ->
+        // Removals happen atomically and BEFORE any close, so the
+        // listen loop's exit handler sees an unregistered
+        // forwarder and stays quiet (the security-fix-16
+        // invariant). The blocking close/cancel calls run on the
+        // snapshots, outside the lock.
+        val forwarder: LocalPortForwarder?
+        val job: Job?
+        val forward: RemotePortForwarder.Forward?
+        synchronized(registryLock) {
+            forwarder = localForwarders.remove(configId)
+            job = localJobs.remove(configId)
+            forward = remoteForwards.remove(configId)
+            activeMap.remove(configId)
+        }
+        if (forwarder != null) {
             try {
                 forwarder.close()
             } catch (_: Exception) {
             }
         }
-        localJobs.remove(configId)?.cancel()
-        val forward = remoteForwards.remove(configId)
+        job?.cancel()
         if (forward != null && client != null) {
             try {
                 client.remotePortForwarder.cancel(forward)
             } catch (_: Exception) {
             }
         }
-        activeMap.remove(configId)
         refresh()
     }
 
     /** Stop every forward. Call before disconnecting the client. */
     fun stopAll(connection: SshConnection?) {
-        val ids = activeMap.keys.toList()
+        val ids = synchronized(registryLock) { activeMap.keys.toList() }
         for (id in ids) {
             stop(connection, id)
         }
@@ -230,7 +266,9 @@ class SshTunnelManager {
     }
 
     private fun refresh() {
-        _active.value = activeMap.values.sortedBy { it.configId }
+        _active.value = synchronized(registryLock) {
+            activeMap.values.sortedBy { it.configId }
+        }
     }
 
     private fun TunnelConfig.toActive(): ActiveTunnel = ActiveTunnel(

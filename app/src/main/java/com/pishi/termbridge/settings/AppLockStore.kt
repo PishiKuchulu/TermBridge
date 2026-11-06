@@ -50,6 +50,27 @@ class AppLockStore(context: Context) {
     private val _coverRecents = MutableStateFlow(prefs.getBoolean(K_COVER, true))
     val coverRecents: StateFlow<Boolean> = _coverRecents.asStateFlow()
 
+    // Audit #6 TB-005: process-lifetime lock session state. This
+    // store lives in the Application, so these survive activity
+    // recreation (rotation, theme / locale / font-scale change)
+    // that used to drop the user back on the lock screen, ignoring
+    // the auto-lock delay entirely. A fresh PROCESS still starts
+    // locked (both reset with the process), and the background
+    // delay check in MainActivity.onStart is unchanged.
+    @Volatile
+    var unlockedThisProcess: Boolean = false
+
+    @Volatile
+    var backgroundedAtElapsed: Long = 0L
+
+    fun markUnlocked() {
+        unlockedThisProcess = true
+    }
+
+    fun markLocked() {
+        unlockedThisProcess = false
+    }
+
     private fun readMethod(): LockMethod =
         try {
             LockMethod.valueOf(prefs.getString(K_METHOD, null) ?: LockMethod.PIN.name)
@@ -74,6 +95,9 @@ class AppLockStore(context: Context) {
     }
 
     private fun storeSecret(secret: String, method: LockMethod) {
+        // Audit #6 TB-005 corollary: setting or replacing the
+        // lock re-arms it for this process as well.
+        unlockedThisProcess = false
         val salt = PinLock.newSalt()
         prefs.edit()
             .putString(K_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
@@ -141,6 +165,7 @@ class AppLockStore(context: Context) {
      *  preferences survive: they are not secrets. */
     @Synchronized
     fun disable() {
+        unlockedThisProcess = false
         val delay = prefs.getLong(K_DELAY, DEFAULT_AUTO_LOCK_MS)
         val cover = prefs.getBoolean(K_COVER, true)
         prefs.edit().clear()

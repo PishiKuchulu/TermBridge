@@ -171,6 +171,9 @@ class SessionViewModel(
      *  preview dialog shows before recording. */
     private val HISTORY_IMPORT_PREVIEW_LINES = 10
 
+    /** Audit #6 TB-006: transcript queue element bound. */
+    private val TRANSCRIPT_CHANNEL_CAPACITY = 256
+
     // Item T-16: the detected remote OS (display text), or
     // null when not probed / not detectable.
     private val _detectedOs = MutableStateFlow<UiMessage?>(null)
@@ -322,8 +325,15 @@ class SessionViewModel(
     }
 
     // Item T-03: transcript capture state (all null/0 = off).
+    // Audit #6 TB-002: line tracking is ABSOLUTE (see
+    // TranscriptLineTracker) — a raw line-count diff stalls
+    // forever once the parser's scrollback cap is reached.
     private var transcriptTarget: Long? = null
-    private var transcriptLinesSeen = 0
+    private val transcriptTracker =
+        com.pishi.termbridge.domain.TranscriptLineTracker()
+
+    /** Audit #6 TB-006: transcript chunks dropped at the bound. */
+    private var transcriptDroppedChunks = 0L
     private var transcriptChannel: kotlinx.coroutines.channels.Channel<String>? = null
     private var transcriptJob: Job? = null
 
@@ -707,24 +717,28 @@ class SessionViewModel(
                 terminal.snapshot.collect { snap ->
                     _terminalSnapshot.value = snap
                     // Item T-03: transcript capture — new lines
-                    // only, scrubbed before they queue. Line-count
-                    // based: a line is recorded when it scrolls
-                    // into history; the final screenful and lines
-                    // trimmed by the parser's own scrollback cap
-                    // are not captured (documented limit).
+                    // only, scrubbed before they queue. Absolute
+                    // line positions (audit #6 TB-002): a line is
+                    // recorded when it scrolls into history; the
+                    // final screenful is not captured (documented
+                    // limit), but capture no longer stalls at the
+                    // scrollback cap.
                     val target = transcriptTarget
                     if (target != null) {
-                        val total = snap.lines.size
-                        if (total > transcriptLinesSeen) {
-                            val fresh = snap.lines.subList(transcriptLinesSeen, total)
-                            transcriptLinesSeen = total
+                        val range = transcriptTracker.advance(
+                            snap.scrollbackTrimmed, snap.lines.size
+                        )
+                        if (range != null) {
+                            val fresh = snap.lines.subList(
+                                range.first, range.last + 1
+                            )
                             val text = fresh.joinToString("\n") { line ->
                                 com.pishi.termbridge.domain.SecretRedactor
                                     .scrubFreeText(line.asText())
                             } + "\n"
-                            transcriptChannel?.trySend(text)
-                        } else if (total < transcriptLinesSeen) {
-                            transcriptLinesSeen = total
+                            if (transcriptChannel?.trySend(text)?.isFailure == true) {
+                                transcriptDroppedChunks++
+                            }
                         }
                     }
                 }
@@ -943,11 +957,15 @@ class SessionViewModel(
     private fun startTranscript(profile: com.pishi.termbridge.domain.HostProfile) {
         val store = transcriptStore ?: return
         stopTranscript()
+        // Audit #6 TB-006: bounded — a stalled disk must not let
+        // scrubbed chunks accumulate in the heap without limit.
+        // Overflow drops chunks and counts them in
+        // transcriptDroppedChunks.
         val channel = kotlinx.coroutines.channels.Channel<String>(
-            kotlinx.coroutines.channels.Channel.UNLIMITED
+            TRANSCRIPT_CHANNEL_CAPACITY
         )
         transcriptChannel = channel
-        transcriptLinesSeen = 0
+        transcriptTracker.reset()
         transcriptTarget = profile.id
         transcriptJob = viewModelScope.launch(Dispatchers.IO) {
             for (chunk in channel) {
@@ -973,7 +991,7 @@ class SessionViewModel(
         transcriptChannel?.close()
         transcriptChannel = null
         transcriptJob = null
-        transcriptLinesSeen = 0
+        transcriptTracker.reset()
     }
 
     fun disconnect() {

@@ -27,7 +27,12 @@ object BlobContexts {
  * [BlobContexts]). Blobs written before R-02 have no version
  * byte and no AAD; [decrypt] still reads them (the legacy
  * path ignores the context) so repository load paths can
- * migrate them opportunistically via [isLegacyBlob].
+ * migrate them opportunistically via [isLegacyBlob]. One
+ * corner (audit #6 TB-009): a legacy blob whose random IV
+ * starts with 0x02 is indistinguishable from v2 by the header
+ * byte, so [isLegacyBlob] misses it and it never migrates —
+ * but [decrypt] falls back to the legacy layout when the v2
+ * authentication fails, so it stays readable.
  *
  * Production implementation: [AndroidKeystoreSecretCrypto].
  * JVM tests use an in-memory test double (test sources only,

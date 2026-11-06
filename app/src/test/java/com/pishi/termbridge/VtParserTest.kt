@@ -263,4 +263,33 @@ class VtParserTest {
         assertEquals("l3", snapshot.lines[1].asText())
         assertEquals("l4", snapshot.lines[2].asText())
     }
+
+    @Test
+    fun repaintOnlyFrameStillChangesSnapshot() {
+        // Audit #6 TB-001 regression: an in-place repaint that ends
+        // at the same cursor position changes cell contents only.
+        // Because snapshot lines alias the live rows, the two
+        // snapshots would compare EQUAL without the revision
+        // counter, and StateFlow would drop the frame entirely.
+        val parser = VtParser(10, 2)
+        parser.feed("[===>")
+        val first = parser.snapshot()
+        parser.feed("\r[===-")
+        val second = parser.snapshot()
+        assertEquals(first.cursorCol, second.cursorCol)
+        assertTrue(first != second)
+        assertTrue(second.revision > first.revision)
+    }
+
+    @Test
+    fun scrollbackTrimmedCountsDroppedLines() {
+        // Audit #6 TB-002 support: the absolute line position of a
+        // snapshot line is scrollbackTrimmed + index; the trimmed
+        // count must grow exactly by the lines dropped at the cap.
+        val parser = VtParser(10, 2, maxScrollback = 3)
+        parser.feed("l1\r\nl2\r\nl3\r\nl4\r\nl5\r\nl6")
+        val snapshot = parser.snapshot()
+        assertEquals(3, snapshot.scrollbackCount)
+        assertEquals(1L, snapshot.scrollbackTrimmed)
+    }
 }

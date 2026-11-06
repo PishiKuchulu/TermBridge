@@ -38,7 +38,6 @@ import com.pishi.termbridge.ui.theme.TermBridgeTheme
  */
 class MainActivity : FragmentActivity() {
     private var locked by mutableStateOf(false)
-    private var stoppedAt = 0L
 
     /** Volume-key handler registered by the app while the
      *  session route is showing (item T-19); null everywhere
@@ -90,7 +89,11 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as TermBridgeApplication
-        locked = app.appLock.enabled.value
+        // Audit #6 TB-005: a recreated activity (rotation and other
+        // configuration changes) is a RESUME, not a fresh launch —
+        // only lock here when this process has not been unlocked
+        // yet. The background-delay rule lives in onStart.
+        locked = app.appLock.enabled.value && !app.appLock.unlockedThisProcess
         // Apply the stored choice before the first frame (no window in
         // which a protected screen is briefly capturable).
         if (app.appSettings.settings.value.blockScreenshots ||
@@ -145,7 +148,10 @@ class MainActivity : FragmentActivity() {
                 setAutoLockDelay = { ms -> app.appLock.setAutoLockDelay(ms) },
                 coverRecents = coverRecents,
                 setCoverRecents = { on -> app.appLock.setCoverRecents(on) },
-                lockNow = { locked = true }
+                lockNow = {
+                    locked = true
+                    app.appLock.markLocked()
+                }
             )
             val promptTitle = getString(R.string.lock_biometric_title)
             val promptCancel = getString(R.string.action_cancel)
@@ -182,11 +188,17 @@ class MainActivity : FragmentActivity() {
                         LockScreen(
                             store = app.appLock,
                             biometricEnabled = biometricOn && biometricAvailable,
-                            onUnlocked = { locked = false },
+                            onUnlocked = {
+                                locked = false
+                                app.appLock.markUnlocked()
+                            },
                             onBiometric = {
                                 BiometricHelper.prompt(
                                     this@MainActivity, promptTitle, promptCancel
-                                ) { locked = false }
+                                ) {
+                                    locked = false
+                                    app.appLock.markUnlocked()
+                                }
                             }
                         )
                     }
@@ -197,16 +209,22 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        stoppedAt = SystemClock.elapsedRealtime()
+        // Audit #6 TB-005: the timestamp lives in the
+        // Application-scoped store — an activity field dies with a
+        // recreated activity, exactly when it is needed.
+        val app = application as TermBridgeApplication
+        app.appLock.backgroundedAtElapsed = SystemClock.elapsedRealtime()
     }
 
     override fun onStart() {
         super.onStart()
         val app = application as TermBridgeApplication
+        val stoppedAt = app.appLock.backgroundedAtElapsed
         if (stoppedAt > 0L && app.appLock.enabled.value &&
             SystemClock.elapsedRealtime() - stoppedAt > app.appLock.autoLockDelayMs.value
         ) {
             locked = true
+            app.appLock.markLocked()
         }
     }
 }

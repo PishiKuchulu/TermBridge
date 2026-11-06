@@ -5,6 +5,8 @@ import com.pishi.termbridge.domain.HostProfile
 import com.pishi.termbridge.domain.ProxyKind
 import java.security.PublicKey
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.userauth.password.PasswordUtils
@@ -99,6 +101,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
     ): SshConnection {
         val profile = request.profile
         val storedFingerprint = trustStore.getTrustedFingerprint(profile.endpoint)
+        val storedKeyType = trustStore.getTrustedKeyType(profile.endpoint)
         val client = SSHClient()
         inFlightClients += client
         try {
@@ -116,6 +119,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                     connectTimeoutMs = request.connectTimeoutMs,
                     socketTimeoutMs = request.socketTimeoutMs,
                     storedFingerprint = storedFingerprint,
+                    storedKeyType = storedKeyType,
                     decisionHandler = decisionHandler,
                     connectAction = { client.connect(profile.hostname, profile.port) }
                 )
@@ -172,6 +176,9 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
         val storedFingerprints = allProfiles.associateWith { profile ->
             trustStore.getTrustedFingerprint(profile.endpoint)
         }
+        val storedKeyTypes = allProfiles.associateWith { profile ->
+            trustStore.getTrustedKeyType(profile.endpoint)
+        }
         val clients = mutableListOf<SSHClient>()
         try {
             return withContext(Dispatchers.IO) {
@@ -195,6 +202,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                         connectTimeoutMs = hop.connectTimeoutMs,
                         socketTimeoutMs = hop.socketTimeoutMs,
                         storedFingerprint = storedFingerprints.getValue(hop.profile),
+                        storedKeyType = storedKeyTypes.getValue(hop.profile),
                         decisionHandler = decisionHandler,
                         connectAction = {
                             if (currentDirect == null) {
@@ -231,6 +239,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                     connectTimeoutMs = target.connectTimeoutMs,
                     socketTimeoutMs = target.socketTimeoutMs,
                     storedFingerprint = storedFingerprints.getValue(target.profile),
+                    storedKeyType = storedKeyTypes.getValue(target.profile),
                     decisionHandler = decisionHandler,
                     connectAction = { targetClient.connectVia(targetDirect) }
                 )
@@ -280,6 +289,7 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
         connectTimeoutMs: Int,
         socketTimeoutMs: Int,
         storedFingerprint: String?,
+        storedKeyType: String?,
         decisionHandler: HostKeyDecisionHandler,
         connectAction: () -> Unit
     ): PendingTrust? {
@@ -330,12 +340,21 @@ class SshTransport(private val trustStore: HostKeyTrustStore) {
                     }
                 }
 
-                // sshj 0.40.0 requires this second verifier
-                // method; this verifier tracks fingerprints,
-                // not algorithms, so there is nothing stored
-                // to report here.
+                // Audit #6 TB-004: sshj feeds this list into
+                // KEXINIT construction, where it REORDERS the
+                // advertised host-key algorithms to prefer the
+                // ones the host was already trusted with
+                // (Proposal.filterKnownHostKeyAlgorithms, verified
+                // in the pinned jar). Returning the stored key
+                // type prevents spurious CHANGED prompts when a
+                // server's key set or ordering changes; the old
+                // empty list made negotiation ignore trust
+                // entirely. The trust record stores the sshj
+                // algorithm name verbatim (HostKeyFingerprint.
+                // sshKeyType), which is exactly the form sshj
+                // expects here.
                 override fun findExistingAlgorithms(hostname: String, port: Int): List<String> =
-                    emptyList()
+                    storedKeyType?.let { listOf(it) } ?: emptyList()
             }
         )
         connectAction()
@@ -500,17 +519,43 @@ internal suspend fun execOnceOn(
 ): String = withContext(Dispatchers.IO) {
     client.startSession().use { session ->
         val cmd = session.exec(command)
+        // Audit #6 TB-003: timeoutMs must bound the READ phase,
+        // not only the join after it. A command that trickles
+        // output — or never closes stdout — would otherwise hold
+        // the caller until the socket timeout (or indefinitely
+        // while bytes keep arriving under the cap). The watchdog
+        // closes the command channel at the deadline; the blocked
+        // read then fails/ends and the loop unwinds.
+        val deadlineHit = java.util.concurrent.atomic.AtomicBoolean(false)
+        val watchdog = launch {
+            delay(timeoutMs)
+            deadlineHit.set(true)
+            try {
+                cmd.close()
+            } catch (_: Exception) {
+                // Already finished; nothing to bound.
+            }
+        }
         val buffer = java.io.ByteArrayOutputStream()
         val chunk = ByteArray(8192)
         var total = 0
         val input = cmd.inputStream
-        while (total < SshExecChannel.EXEC_OUTPUT_CAP) {
-            val read = input.read(
-                chunk, 0, minOf(chunk.size, SshExecChannel.EXEC_OUTPUT_CAP - total)
-            )
-            if (read < 0) break
-            buffer.write(chunk, 0, read)
-            total += read
+        try {
+            while (total < SshExecChannel.EXEC_OUTPUT_CAP) {
+                val read = input.read(
+                    chunk, 0, minOf(chunk.size, SshExecChannel.EXEC_OUTPUT_CAP - total)
+                )
+                if (read < 0) break
+                buffer.write(chunk, 0, read)
+                total += read
+            }
+        } catch (e: Exception) {
+            // Only the deadline's own close is swallowed (partial
+            // output is the documented timeout result); a genuine
+            // mid-read failure keeps the old throw semantics.
+            if (!deadlineHit.get()) throw e
+        } finally {
+            watchdog.cancel()
         }
         try {
             cmd.join(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)

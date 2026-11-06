@@ -331,6 +331,9 @@ class HostRepository(
     override suspend fun getTrustedFingerprint(endpoint: String): String? =
         trustedHostKeyDao.getByEndpoint(endpoint)?.fingerprint
 
+    override suspend fun getTrustedKeyType(endpoint: String): String? =
+        trustedHostKeyDao.getByEndpoint(endpoint)?.keyType
+
     override suspend fun trustHostKey(endpoint: String, fingerprint: String, keyType: String) {
         val now = clock()
         val existing = trustedHostKeyDao.getByEndpoint(endpoint)

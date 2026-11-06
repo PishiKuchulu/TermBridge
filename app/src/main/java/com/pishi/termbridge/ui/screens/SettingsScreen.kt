@@ -611,6 +611,13 @@ private fun AppUpdateBlock() {
                 UpdateStatusText(
                     stringResource(R.string.update_available, result.tag)
                 )
+                // Audit #6 TB-012: the download is a plain
+                // browser hand-off with no hash or signature
+                // check on our side; say so where the user
+                // acts on it.
+                UpdateStatusText(
+                    stringResource(R.string.update_unverified_note)
+                )
                 LinkRow(
                     title = stringResource(R.string.update_download_action),
                     onClick = {

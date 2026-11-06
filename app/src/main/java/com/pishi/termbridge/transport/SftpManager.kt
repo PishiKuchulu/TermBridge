@@ -26,6 +26,17 @@ sealed class SftpError(val userMessage: String) {
     object AlreadyExists : SftpError("An entry with that name already exists.")
     object IntegrityMismatch : SftpError("Transfer finished but the size does not match. The file may be incomplete.")
     object Cancelled : SftpError("Transfer cancelled.")
+
+    /** Audit #6 TB-014: an overwrite upload whose final rename
+     *  failed after the previous remote file was already removed
+     *  (SFTP v3 rename cannot replace atomically). The complete
+     *  upload survives under its temporary name; the message
+     *  names it so the user can recover it manually. */
+    class RenameFailed(tempPath: String) : SftpError(
+        "The upload completed but could not be moved into place, and the " +
+            "previous version was already removed. The new file is still " +
+            "on the server as $tempPath — rename it manually to recover it."
+    )
     object Generic : SftpError("File operation failed. Please try again.")
 }
 
@@ -286,7 +297,13 @@ class SftpManager(private val connection: SshjConnection) {
                 // Complete upload stays under its temporary name.
                 tempWritten = false
                 throw SftpException(
-                    if (statSize(normalized) != null) SftpError.AlreadyExists else mapError(e),
+                    // Audit #6 TB-014: after an overwrite delete,
+                    // name the surviving temp file — the previous
+                    // version is gone and the temp path is the
+                    // only recovery route.
+                    if (overwrite) SftpError.RenameFailed(tempPath)
+                    else if (statSize(normalized) != null) SftpError.AlreadyExists
+                    else mapError(e),
                     e
                 )
             }

@@ -3,10 +3,16 @@
 Date: 2026-10-24. Version: `0.1.0-foundation`
 (versionCode 1, working application ID
 `com.pishi.termbridge`, debug suffix `.debug`).
-Database: v5. UI language: English v1 (decision open,
+Database: v10. UI language: English + Persian (complete).
 see below).
 
 ## Release status: BLOCKED / PROVISIONAL — NOT a release
+
+> **Superseded (2026-11-06, audit #6 TB-015):** this document is
+> the prompt-18 handoff record. The project has since shipped
+> signed releases v0.1.0 and v0.1.1 (GitHub Releases, tag builds
+> verified against the release keystore); read the status below
+> as the state at handoff time, not the current state.
 
 This tree is a **handoff, not a release**. No APK, no
 source ZIP, and no SHA-256 release hash is produced

@@ -70,3 +70,24 @@
 - No secret in an error message. Repository errors are constructed
   from validation field names and generic text; `SecretRedactor`
   is the second net for free-text fields.
+
+
+## Known residuals (audit #6, 2026-11-06)
+
+- **TB-011 — secrets materialised as `String`.** sshj's auth
+  API takes `String`, so the decrypted password / PEM is
+  materialised as an immutable `String` at the auth boundary
+  (`SshTransport`). The source byte arrays are wiped by the
+  caller, but a `String` cannot be zeroed and lives until GC.
+  This is a heap-dump-class residual, accepted because the
+  alternative (a forked auth stack) is a worse risk.
+- **TB-017 — biometric unlock is an unbound UI gate.** The
+  biometric prompt carries no `CryptoObject`, and the PIN /
+  pattern hash is independent of the Keystore, so biometric
+  success releases no key material — by design: the app lock
+  defends against a shoulder-surfer, not against someone who
+  controls the device's biometrics. Credential encryption
+  deliberately does NOT require user authentication
+  (`setUserAuthenticationRequired(false)`), so enrolling a
+  new fingerprint can never lock the user out of their own
+  stored credentials.

@@ -117,7 +117,19 @@ class AndroidKeystoreSecretCrypto : SecretCrypto {
                 init(Cipher.DECRYPT_MODE, getExistingKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
                 updateAAD(context.toByteArray(Charsets.UTF_8))
             }
-            cipher.doFinal(ciphertext)
+            try {
+                cipher.doFinal(ciphertext)
+            } catch (e: javax.crypto.AEADBadTagException) {
+                // Audit #6 TB-009: a legacy (v1) blob whose random
+                // IV happens to start with 0x02 is routed to the v2
+                // path by the first-byte check and could never
+                // authenticate there — the credential was silently
+                // lost (1 in 256 legacy rows). Fall back to the
+                // legacy layout: it is AES-GCM too, with a
+                // different IV/AAD layout, so a genuine v2 blob
+                // still fails both paths and nothing is weakened.
+                decryptLegacy(blob)
+            }
         }
     }
 

@@ -448,6 +448,7 @@
     <string name="update_up_to_date">This is the latest version.</string>
     <string name="update_available">Version %1$s is available.</string>
     <string name="update_download_action">Download update</string>
+    <string name="update_unverified_note">TermBridge cannot verify the downloaded file. Install it only if you trust the source.</string>
     <string name="update_check_failed">Could not check for updates. Try again later.</string>
     <string name="settings_clear_history">Clear command history</string>
     <string name="settings_clear_history_title">Clear command history?</string>

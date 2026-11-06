@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,13 +71,39 @@ class TerminalSession(
      * [sendBytes] only enqueues — it never touches the socket, so
      * calling it from a Compose handler (main thread) cannot throw
      * NetworkOnMainThreadException and cannot silently drop keys
-     * into a swallowed catch. The channel is UNLIMITED and
-     * single-consumer, so byte order is preserved exactly. The
+     * into a swallowed catch. The channel is capacity-bounded
+     * (audit #6 TB-006) and single-consumer, so byte order is
+     * preserved exactly. The
      * channel is recreated on every [start] so a previous [close]
      * cannot leave stale bytes for a later shell.
      */
-    @Volatile private var writeChannel = Channel<ByteArray>(Channel.UNLIMITED)
+    @Volatile private var writeChannel = Channel<ByteArray>(WRITE_CHANNEL_CAPACITY)
     @Volatile private var writerJob: Job? = null
+
+    // Audit #6 TB-020: reader / writer / resize jobs run in a
+    // scope this session OWNS and cancels in [close]; the old
+    // ad-hoc CoroutineScope(Dispatchers.IO) launches were never
+    // cancelled and their containers outlived the session.
+    @Volatile private var scopeJob = SupervisorJob()
+    @Volatile private var sessionScope = CoroutineScope(scopeJob + Dispatchers.IO)
+
+    private fun activeScope(): CoroutineScope {
+        if (scopeJob.isCancelled) {
+            scopeJob = SupervisorJob()
+            sessionScope = CoroutineScope(scopeJob + Dispatchers.IO)
+        }
+        return sessionScope
+    }
+
+    // Audit #6 TB-006: the input queue is bounded in elements AND
+    // in queued bytes; see [sendBytes].
+    private val queuedInputBytes = java.util.concurrent.atomic.AtomicLong(0)
+    private val droppedInputBytesCounter =
+        java.util.concurrent.atomic.AtomicLong(0)
+
+    /** Input bytes dropped so far because the queue was at its
+     *  bound (stalled connection, oversized paste). */
+    val droppedInputBytes: Long get() = droppedInputBytesCounter.get()
 
     /** Called once when the shell ends (EOF or error). Null
      *  argument = clean EOF (server closed the shell). */
@@ -118,7 +145,8 @@ class TerminalSession(
             // session, so a key sent while the shell is starting is
             // queued for the writer instead of landing in a channel
             // that is replaced a moment later and dropped.
-            writeChannel = Channel(Channel.UNLIMITED)
+            writeChannel = Channel(WRITE_CHANNEL_CAPACITY)
+            queuedInputBytes.set(0)
             val sess = connection.sshClient.startSession()
             session = sess
             sess.allocatePTY(
@@ -144,7 +172,7 @@ class TerminalSession(
                 EnvApplyResult(appliedNames = applied, rejectedNames = rejected)
             )
             val channel = writeChannel
-            writerJob = CoroutineScope(Dispatchers.IO).launch {
+            writerJob = activeScope().launch {
                 for (bytes in channel) {
                     try {
                         sess.outputStream.write(bytes)
@@ -155,10 +183,12 @@ class TerminalSession(
                         // does, unless this was an intentional
                         // close (closed == true suppresses it).
                         if (!closed) notifyClosed(e)
+                    } finally {
+                        queuedInputBytes.addAndGet(-bytes.size.toLong())
                     }
                 }
             }
-            readerJob = CoroutineScope(Dispatchers.IO).launch {
+            readerJob = activeScope().launch {
                 try {
                     val reader = InputStreamReader(sess.inputStream, StandardCharsets.UTF_8)
                     val buffer = CharArray(4096)
@@ -206,7 +236,23 @@ class TerminalSession(
         // When no shell is running, bytes are dropped, exactly as
         // the old null-session no-op did.
         if (session == null) return
-        writeChannel.trySend(bytes)
+        // Audit #6 TB-006: bounded queueing. A multi-megabyte
+        // paste into a stalled connection used to grow the heap
+        // without limit; excess input is now dropped and counted
+        // in [droppedInputBytes] instead.
+        val size = bytes.size.toLong()
+        while (true) {
+            val current = queuedInputBytes.get()
+            if (current + size > MAX_QUEUED_INPUT_BYTES) {
+                droppedInputBytesCounter.addAndGet(size)
+                return
+            }
+            if (queuedInputBytes.compareAndSet(current, current + size)) break
+        }
+        if (writeChannel.trySend(bytes).isFailure) {
+            queuedInputBytes.addAndGet(-size)
+            droppedInputBytesCounter.addAndGet(size)
+        }
     }
 
     fun sendText(text: String) {
@@ -238,7 +284,7 @@ class TerminalSession(
         // so it never runs on the calling (UI) thread; failures are
         // non-fatal — the local grid has already changed.
         val sh = shell ?: return
-        CoroutineScope(Dispatchers.IO).launch {
+        activeScope().launch {
             try {
                 sh.changeWindowDimensions(cols, rows, 0, 0)
             } catch (_: Exception) {
@@ -258,6 +304,7 @@ class TerminalSession(
         closed = true
         readerJob?.cancel()
         writerJob?.cancel()
+        scopeJob.cancel()
         writeChannel.close()
         try {
             session?.close()
@@ -266,5 +313,13 @@ class TerminalSession(
         }
         session = null
         shell = null
+    }
+
+    companion object {
+        /** Audit #6 TB-006: element bound for the input queue. */
+        const val WRITE_CHANNEL_CAPACITY = 8192
+
+        /** Audit #6 TB-006: total queued input bytes bound. */
+        const val MAX_QUEUED_INPUT_BYTES = 4L * 1024 * 1024
     }
 }

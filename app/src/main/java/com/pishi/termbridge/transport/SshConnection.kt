@@ -7,6 +7,12 @@ import com.pishi.termbridge.domain.ProxyConfig
 /** Trust store as seen by the transport. Implemented by HostRepository. */
 interface HostKeyTrustStore {
     suspend fun getTrustedFingerprint(endpoint: String): String?
+
+    /** Audit #6 TB-004: the stored host key's algorithm name
+     *  (e.g. "ssh-ed25519"), used to prefer the already-trusted
+     *  algorithm during key exchange. Default null keeps test
+     *  doubles source-compatible. */
+    suspend fun getTrustedKeyType(endpoint: String): String? = null
     suspend fun trustHostKey(endpoint: String, fingerprint: String, keyType: String)
     suspend fun clearTrustedKey(endpoint: String)
 }
