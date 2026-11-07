@@ -116,11 +116,11 @@ jobs:
   # carry an exported FIXTURE_PASSWORD from the workflow's
   # script block into the fixture step, so the password must
   # never rely on the runner preserving environment between
-  # lines. The 13 implemented SshIntegrationTest cases run
-  # against a real OpenSSH server; the 6 remaining cases stay
-  # @Ignore'd with specific reasons, and without a fixture the
-  # tests skip via Assume. The fixture password is generated
-  # per run, used only inside the wrapper, and never committed.
+  # lines. The SshIntegrationTest cases (21) run against a
+  # real OpenSSH server; no test in the class is @Ignore'd,
+  # and without a fixture the tests skip via Assume. The
+  # fixture password is generated per run, used only inside
+  # the wrapper, and never committed.
   instrumented:
     runs-on: ubuntu-latest
     steps:
