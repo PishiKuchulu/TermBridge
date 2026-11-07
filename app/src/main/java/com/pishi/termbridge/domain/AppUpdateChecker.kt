@@ -1,6 +1,8 @@
 package com.pishi.termbridge.domain
 
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.serialization.json.Json
@@ -22,10 +24,11 @@ import kotlinx.serialization.json.jsonPrimitive
  * system flow — the app holds no install permission and never
  * downloads the APK itself.
  *
- * The repository is currently private, so an unauthenticated
- * call gets a 404 and the honest outcome is [CheckFailed]
- * ("check unavailable") — never a crash and never a fake
- * "up to date".
+ * The repository is public, so the unauthenticated call
+ * needs no credential. Any failure along the way (offline,
+ * HTTP error, oversized or malformed payload) is the honest
+ * [CheckFailed] ("check unavailable") — never a crash and
+ * never a fake "up to date" (audit #7 AUD-014).
  */
 sealed interface UpdateCheckResult {
     /** A strictly newer release exists; [tag] is its raw tag
@@ -69,7 +72,12 @@ class GitHubLatestReleaseFetcher(
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                 null
             } else {
-                connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                // Audit #7 AUD-004: capped read — the response
+                // size is whatever the server (or a redirect
+                // target) says it is, so it is never trusted.
+                connection.inputStream.use { input ->
+                    readCapped(input, MAX_RESPONSE_BYTES)
+                }
             }
         } catch (_: IOException) {
             null
@@ -83,8 +91,32 @@ class GitHubLatestReleaseFetcher(
     companion object {
         const val LATEST_RELEASE_URL =
             "https://api.github.com/repos/PishiKuchulu/TermBridge/releases/latest"
+
+        /** A releases/latest body is tens of KB; 256 KB is a
+         *  generous ceiling, not an expectation. */
+        const val MAX_RESPONSE_BYTES = 256 * 1024
         private const val TIMEOUT_MS = 8_000
     }
+}
+
+/**
+ * Reads [input] to EOF as UTF-8 text, returning null when the
+ * stream carries more than [maxBytes] (audit #7 AUD-004): the
+ * caller treats null as a failed fetch, so an endless or
+ * oversized response degrades to "check unavailable" instead
+ * of exhausting memory. The stream is NOT closed here; the
+ * caller owns it.
+ */
+fun readCapped(input: InputStream, maxBytes: Int): String? {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        if (out.size() + read > maxBytes) return null
+        out.write(buffer, 0, read)
+    }
+    return String(out.toByteArray(), Charsets.UTF_8)
 }
 
 object AppUpdateChecker {
@@ -134,8 +166,16 @@ object AppUpdateChecker {
      */
     fun evaluate(currentVersion: String, payloadJson: String?): UpdateCheckResult {
         if (payloadJson.isNullOrBlank()) return UpdateCheckResult.CheckFailed
+        // Audit #7 AUD-004 follow-through: even a size-capped
+        // payload can nest deeply, so the AUD-001 depth guard
+        // runs here too, before the parser recurses.
+        if (JsonDepth.exceeds(payloadJson, MAX_JSON_DEPTH)) {
+            return UpdateCheckResult.CheckFailed
+        }
         val root: JsonObject = try {
             Json.parseToJsonElement(payloadJson).jsonObject
+        } catch (_: StackOverflowError) {
+            return UpdateCheckResult.CheckFailed
         } catch (_: Exception) {
             return UpdateCheckResult.CheckFailed
         }

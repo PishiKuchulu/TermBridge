@@ -10,6 +10,8 @@ import com.pishi.termbridge.domain.ExportCredential
 import com.pishi.termbridge.domain.ExportHost
 import com.pishi.termbridge.domain.ExportKeychainEntry
 import com.pishi.termbridge.domain.ExportVariable
+import com.pishi.termbridge.domain.MAX_FIELD_CHARS
+import com.pishi.termbridge.domain.MAX_SHORT_FIELD_CHARS
 import com.pishi.termbridge.domain.RemoteShell
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -498,5 +500,109 @@ class BackupCodecTest {
         assertNotNull(decoded.document.hosts.single().settings)
         assertEquals("/home/admin", decoded.document.hosts.single().settings?.remoteWorkingDirectory)
         assertEquals(RemoteShell.POSIX, decoded.document.hosts.single().settings?.remoteShell)
+    }
+
+    // ---- Audit #7 strictness: AUD-001/002/002b/003 ----
+
+    @Test
+    fun deeplyNestedJsonFailsWithBackupException() {
+        // AUD-001: without the depth guard this input escapes
+        // as a StackOverflowError (an Error), crashing the
+        // process instead of producing this exception.
+        val text = "[".repeat(5_000) + "]".repeat(5_000)
+        try {
+            BackupCodec.decodeEnvelope(text, null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("deeply nested"))
+        }
+    }
+
+    @Test
+    fun deeplyNestedInsidePayloadFails() {
+        val plain = plainText(BackupDocument(listOf(host())))
+        val injected = plain.replace(
+            "\"tags\":\"\"",
+            "\"tags\":\"\",\"evil\":" + "[".repeat(500) + "]".repeat(500)
+        )
+        try {
+            BackupCodec.decodeEnvelope(injected, null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("deeply nested"))
+        }
+    }
+
+    @Test
+    fun quotedPortFails() {
+        // AUD-002: "22" is a string, not an int.
+        val text = plainText(BackupDocument(listOf(host())))
+            .replace("\"port\":22", "\"port\":\"22\"")
+        try {
+            BackupCodec.decodeEnvelope(text, null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("wrong type"))
+        }
+    }
+
+    @Test
+    fun quotedVersionFails() {
+        val text = plainText(BackupDocument(listOf(host())))
+            .replace("\"version\":1", "\"version\":\"1\"")
+        try {
+            BackupCodec.decodeEnvelope(text, null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertEquals("Unsupported backup version.", e.message)
+        }
+    }
+
+    @Test
+    fun nullUsernameFails() {
+        // AUD-002b: JSON null must not decode as the text "null".
+        val text = plainText(BackupDocument(listOf(host())))
+            .replace("\"username\":\"admin\"", "\"username\":null")
+        try {
+            BackupCodec.decodeEnvelope(text, null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("wrong type"))
+        }
+    }
+
+    @Test
+    fun nullButtonStepFails() {
+        val text = plainText(BackupDocument(listOf(host())))
+            .replace("\"steps\":[]", "\"steps\":[null]")
+        try {
+            BackupCodec.decodeEnvelope(text, null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("steps"))
+        }
+    }
+
+    @Test
+    fun overlongNameFails() {
+        // AUD-003: per-field length caps on decode.
+        val bad = host().copy(name = "x".repeat(MAX_SHORT_FIELD_CHARS + 1))
+        try {
+            BackupCodec.decodeEnvelope(plainText(BackupDocument(listOf(bad))), null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("too long"))
+        }
+    }
+
+    @Test
+    fun overlongNotesFails() {
+        val bad = host().copy(notes = "x".repeat(MAX_FIELD_CHARS + 1))
+        try {
+            BackupCodec.decodeEnvelope(plainText(BackupDocument(listOf(bad))), null)
+            fail("Expected BackupException")
+        } catch (e: BackupException) {
+            assertTrue(e.message!!.contains("too long"))
+        }
     }
 }

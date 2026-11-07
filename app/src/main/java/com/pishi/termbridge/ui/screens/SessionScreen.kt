@@ -93,6 +93,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -449,8 +450,9 @@ fun SessionScreen(
                         )
                     } else {
                         Text(
-                            text = stringResource(
-                                R.string.commands_sequence_progress,
+                            text = pluralStringResource(
+                                R.plurals.commands_sequence_progress,
+                                sequence.progress.totalSteps,
                                 sequence.progress.stepIndex,
                                 sequence.progress.totalSteps
                             )
@@ -624,8 +626,9 @@ fun SessionScreen(
             text = {
                 Column {
                     Text(
-                        text = stringResource(
-                            R.string.history_import_preview_body,
+                        text = pluralStringResource(
+                            R.plurals.history_import_preview_body,
+                            importPreview.totalAccepted,
                             importPreview.totalAccepted
                         )
                     )
@@ -927,7 +930,9 @@ private fun TerminalView(
         if (!pinnedToBottom && newLines > 0) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SecondaryAction(
-                    label = stringResource(R.string.terminal_jump_to_latest, newLines),
+                    label = pluralStringResource(
+                        R.plurals.terminal_jump_to_latest, newLines, newLines
+                    ),
                     onClick = {
                         offsetFromBottom = 0
                         seenCount = snapshot.lines.size
@@ -1165,6 +1170,14 @@ private fun TerminalView(
                         }
                     }
                     val line = snapshot.lines[row]
+                    // Audit #7 AUD-019: in the pending-wrap
+                    // state the parser's cursor column equals
+                    // the line length (the next character
+                    // wraps). Drawing clamps to the last cell —
+                    // the cell that character will land on —
+                    // instead of one cell past the grid.
+                    val cursorDrawCol = snapshot.cursorCol
+                        .coerceAtMost((line.size - 1).coerceAtLeast(0))
                     // Block cursor = inverted cell (only while
                     // shown); underline/bar are drawn as shapes
                     // below, so their rows keep normal colours.
@@ -1174,18 +1187,18 @@ private fun TerminalView(
                     val annotated = lineToAnnotated(
                         line,
                         isCursorLine = invertCursor,
-                        cursorCol = snapshot.cursorCol,
+                        cursorCol = cursorDrawCol,
                         theme = theme
                     )
                     val key = annotated.text + "|" + annotated.spanStyles.hashCode() +
-                        "|" + invertCursor + "|" + snapshot.cursorCol +
+                        "|" + invertCursor + "|" + cursorDrawCol +
                         "|" + prefs.terminalFontSp + "|" + theme.id
                     val layout = layoutCache.get(key) ?: textMeasurer.measure(
                         annotated, drawStyle
                     ).also { layoutCache.put(key, it) }
                     drawText(layout, topLeft = Offset(0f, y))
                     if (cursorShown && row == snapshot.cursorRow) {
-                        val cursorX = snapshot.cursorCol * cellWidthPx
+                        val cursorX = cursorDrawCol * cellWidthPx
                         when (effectiveCursorShape) {
                             CursorShape.UNDERLINE -> drawLine(
                                 color = Color(theme.cursor),

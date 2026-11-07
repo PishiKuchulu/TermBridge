@@ -1,6 +1,7 @@
 package com.pishi.termbridge.ui.screens
 
 import androidx.activity.compose.BackHandler
+import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -242,8 +244,9 @@ fun FilesScreen(
             title = { Text(stringResource(R.string.files_delete_selected_title)) },
             text = {
                 Text(
-                    stringResource(
-                        R.string.files_delete_selected_body,
+                    pluralStringResource(
+                        R.plurals.files_delete_selected_body,
+                        uiState.selectedPaths.size,
                         uiState.selectedPaths.size
                     )
                 )
@@ -482,8 +485,9 @@ fun FilesScreen(
                 Spacer(modifier = Modifier.height(Spacing.small))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = stringResource(
-                            R.string.files_selected_count,
+                        text = pluralStringResource(
+                            R.plurals.files_selected_count,
+                            uiState.selectedPaths.size,
                             uiState.selectedPaths.size
                         ),
                         style = MaterialTheme.typography.bodyMedium
@@ -543,8 +547,10 @@ fun FilesScreen(
                 if (uiState.queueRemaining > 0) {
                     Spacer(modifier = Modifier.height(Spacing.small))
                     Text(
-                        text = stringResource(
-                            R.string.files_queue_more, uiState.queueRemaining
+                        text = pluralStringResource(
+                            R.plurals.files_queue_more,
+                            uiState.queueRemaining,
+                            uiState.queueRemaining
                         ),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -764,10 +770,12 @@ fun FilesScreen(
 }
 
 private fun formatSize(bytes: Long): String {
+    // Locale.ROOT (audit #7 AUD-007): sizes always render with
+    // a dot decimal separator and Latin digits.
     return when {
         bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
-        bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-        else -> String.format("%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+        bytes < 1024 * 1024 -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
+        bytes < 1024 * 1024 * 1024 -> String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0))
+        else -> String.format(Locale.ROOT, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
     }
 }

@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AuthType
@@ -123,8 +124,9 @@ fun HostsScreen(
             title = { Text(stringResource(R.string.hosts_delete_selected_title)) },
             text = {
                 Text(
-                    stringResource(
-                        R.string.hosts_delete_selected_body,
+                    pluralStringResource(
+                        R.plurals.hosts_delete_selected_body,
+                        selection.size,
                         selection.size
                     )
                 )
@@ -275,8 +277,9 @@ fun HostsScreen(
                     if (selectMode) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = stringResource(
-                                    R.string.hosts_selected_count,
+                                text = pluralStringResource(
+                                    R.plurals.hosts_selected_count,
+                                    selection.size,
                                     selection.size
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,

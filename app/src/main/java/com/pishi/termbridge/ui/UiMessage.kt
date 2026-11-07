@@ -1,7 +1,9 @@
 package com.pishi.termbridge.ui
 
+import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 
 /**
@@ -25,12 +27,29 @@ sealed interface UiMessage {
         val args: List<Any> = emptyList()
     ) : UiMessage
 
+    /** Audit #7 AUD-008: a message whose text is a <plurals>
+     *  resource. [quantity] selects the plural form for the
+     *  locale; the caller also passes it inside [args] when
+     *  the text interpolates the count. */
+    data class PluralRes(
+        @PluralsRes val resId: Int,
+        val quantity: Int,
+        val args: List<Any> = emptyList()
+    ) : UiMessage
+
     data class Raw(val text: String) : UiMessage
 
     companion object {
         /** A message the caller originates: resource + args. */
         fun of(@StringRes resId: Int, vararg args: Any): UiMessage =
             Res(resId, args.toList())
+
+        /** A pluralized message the caller originates. */
+        fun ofPlural(
+            @PluralsRes resId: Int,
+            quantity: Int,
+            vararg args: Any
+        ): UiMessage = PluralRes(resId, quantity, args.toList())
 
         /** A message received ready-made from a lower layer. */
         fun ofText(text: String): UiMessage = Raw(text)
@@ -41,5 +60,7 @@ sealed interface UiMessage {
 @Composable
 fun UiMessage.resolve(): String = when (this) {
     is UiMessage.Res -> stringResource(resId, *args.toTypedArray())
+    is UiMessage.PluralRes ->
+        pluralStringResource(resId, quantity, *args.toTypedArray())
     is UiMessage.Raw -> text
 }

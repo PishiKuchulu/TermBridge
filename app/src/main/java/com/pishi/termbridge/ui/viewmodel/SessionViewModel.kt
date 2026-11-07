@@ -313,8 +313,8 @@ class SessionViewModel(
         val store = commandHistoryStore ?: return
         _pendingHistoryImport.value = null
         val added = store.recordImported(pending.lines)
-        _historyImportMessage.value = UiMessage.of(
-            R.string.history_import_done, added, pending.lines.size
+        _historyImportMessage.value = UiMessage.ofPlural(
+            R.plurals.history_import_done, added, added, pending.lines.size
         )
         refreshSuggestions()
     }

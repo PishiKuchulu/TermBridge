@@ -11,6 +11,7 @@ import com.pishi.termbridge.data.MIGRATION_6_7
 import com.pishi.termbridge.data.MIGRATION_7_8
 import com.pishi.termbridge.data.MIGRATION_8_9
 import com.pishi.termbridge.data.MIGRATION_9_10
+import com.pishi.termbridge.data.MIGRATION_10_11
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -342,6 +343,18 @@ class MigrationSqlAuditTest {
                 // Item T-03: the transcript opt-ins start off.
                 AlterDef("host_settings", col("sessionLogEnabled", "INTEGER"), "0"),
                 AlterDef("host_settings", col("sessionLogInBackup", "INTEGER"), "0")
+            )
+        ),
+        ExpectedMigration(
+            MIGRATION_10_11, 10, 11,
+            tables = emptyList(),
+            indices = listOf(
+                // Audit #7 AUD-006: jumpHostId gets its own
+                // leading index, matching the entity.
+                IndexDef(
+                    "index_jump_hops_jumpHostId", "jump_hops",
+                    listOf("jumpHostId"), false
+                )
             )
         )
     )

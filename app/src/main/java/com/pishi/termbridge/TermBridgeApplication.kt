@@ -18,6 +18,7 @@ import com.pishi.termbridge.data.MIGRATION_6_7
 import com.pishi.termbridge.data.MIGRATION_7_8
 import com.pishi.termbridge.data.MIGRATION_8_9
 import com.pishi.termbridge.data.MIGRATION_9_10
+import com.pishi.termbridge.data.MIGRATION_10_11
 import com.pishi.termbridge.data.TermBridgeDatabase
 import com.pishi.termbridge.data.TransactionRunner
 import com.pishi.termbridge.security.AndroidKeystoreSecretCrypto
@@ -77,7 +78,7 @@ class TermBridgeApplication : Application() {
             applicationContext,
             TermBridgeDatabase::class.java,
             "termbridge.db"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11).build()
     }
 
     val advancedRepository: AdvancedRepository by lazy {

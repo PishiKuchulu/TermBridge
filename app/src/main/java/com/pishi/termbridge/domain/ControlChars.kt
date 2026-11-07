@@ -1,5 +1,7 @@
 package com.pishi.termbridge.domain
 
+import java.util.Locale
+
 /**
  * Control-character policy for every string that is TYPED into a
  * remote terminal (review #2 F-03).
@@ -32,7 +34,9 @@ object ControlChars {
         val sb = StringBuilder(text.length + 8)
         for (c in text) {
             if (c != '\n' && isControl(c)) {
-                sb.append("<0x").append(String.format("%02X", c.code)).append('>')
+                // Locale.ROOT (audit #7 AUD-007): hex digits
+                // must not come out localized.
+                sb.append("<0x").append(String.format(Locale.ROOT, "%02X", c.code)).append('>')
             } else {
                 sb.append(c)
             }

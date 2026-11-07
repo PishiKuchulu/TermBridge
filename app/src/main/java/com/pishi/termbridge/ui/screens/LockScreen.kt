@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -55,7 +56,9 @@ fun LockScreen(
     val method by store.method.collectAsState()
     val wrong = stringResource(R.string.lock_wrong)
     val wrongPattern = stringResource(R.string.lock_wrong_pattern)
-    val throttledText = stringResource(R.string.lock_throttled, throttledSeconds)
+    val throttledText = pluralStringResource(
+        R.plurals.lock_throttled, throttledSeconds, throttledSeconds
+    )
 
     fun onResult(result: UnlockResult, wrongText: String) {
         when (result) {

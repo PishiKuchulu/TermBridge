@@ -39,6 +39,23 @@ const val MAX_BUTTONS_PER_HOST = 100
 const val MAX_ENV_VARS_PER_HOST = 100
 const val MAX_TUNNELS_PER_HOST = 100
 
+/** Audit #7 AUD-001: structural depth cap for backup JSON,
+ *  enforced BEFORE parsing. Legitimate files nest about ten
+ *  levels (envelope → document → host → button → variable);
+ *  deeper text is treated as hostile because the recursive-
+ *  descent parser's failure mode for it is a
+ *  StackOverflowError — an Error, which no catch (e: Exception)
+ *  on the import path converts into a BackupException. */
+const val MAX_JSON_DEPTH = 64
+
+/** Audit #7 AUD-003: per-field string length caps on decode.
+ *  SHORT covers names, labels, addresses and other single-line
+ *  fields; the default covers long text (notes, templates,
+ *  values, key material). Transcript text keeps its own larger
+ *  cap (MAX_TRANSCRIPT_CHARS). */
+const val MAX_SHORT_FIELD_CHARS = 512
+const val MAX_FIELD_CHARS = 20_000
+
 /** Minimum passphrase for an encrypted backup, enforced in the UI
  *  and again in the codec (a short passphrase must fail even if
  *  the UI is bypassed). */

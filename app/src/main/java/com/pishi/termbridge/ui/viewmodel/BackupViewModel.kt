@@ -58,8 +58,9 @@ class BackupViewModel(
         result = null
         if (exportEncrypted) {
             if (exportPassphrase.length < MIN_EXPORT_PASSPHRASE_LENGTH) {
-                error = UiMessage.of(
-                    R.string.backup_error_passphrase_too_short,
+                error = UiMessage.ofPlural(
+                    R.plurals.backup_error_passphrase_too_short,
+                    MIN_EXPORT_PASSPHRASE_LENGTH,
                     MIN_EXPORT_PASSPHRASE_LENGTH
                 )
                 return

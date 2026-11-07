@@ -3,7 +3,7 @@ package com.pishi.termbridge.ui.navigation
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
@@ -269,7 +269,9 @@ fun TermBridgeApp(
                                 ?: navController.navigateUp()
                         }) {
                             Icon(
-                                imageVector = Icons.Filled.ArrowBack,
+                                // AutoMirrored (audit #7 AUD-009):
+                                // the back arrow flips in RTL.
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(R.string.action_back)
                             )
                         }

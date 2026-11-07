@@ -31,6 +31,10 @@ import com.pishi.termbridge.domain.MAX_TUNNELS_PER_HOST
 import com.pishi.termbridge.domain.MIN_EXPORT_PASSPHRASE_LENGTH
 import com.pishi.termbridge.domain.MIN_IMPORT_PASSPHRASE_LENGTH
 import com.pishi.termbridge.domain.MAX_BACKUP_BYTES
+import com.pishi.termbridge.domain.JsonDepth
+import com.pishi.termbridge.domain.MAX_FIELD_CHARS
+import com.pishi.termbridge.domain.MAX_JSON_DEPTH
+import com.pishi.termbridge.domain.MAX_SHORT_FIELD_CHARS
 import com.pishi.termbridge.domain.ProxyKind
 import com.pishi.termbridge.domain.ProxySpecParser
 import com.pishi.termbridge.domain.RemoteShell
@@ -113,6 +117,12 @@ data class ParsedBackup(
  * - Wrong format string, wrong version, malformed JSON, wrong
  *   types, missing required fields, or ANY unknown field at any
  *   level -> whole file rejected.
+ * - Structural depth and per-field length caps (audit #7
+ *   AUD-001/003): nesting beyond MAX_JSON_DEPTH is rejected
+ *   before parsing, so a hostile file gets a BackupException,
+ *   never a StackOverflowError crash; primitive types are
+ *   checked strictly (a quoted "22" is not an int, and JSON
+ *   null is never the string "null" — AUD-002/002b).
  * - A non-encrypted file containing a credential or an env value
  *   -> whole file rejected (a plaintext secret in a file that
  *   claims to be secret-free is a leak, not a warning).
@@ -193,34 +203,53 @@ object BackupCodec {
         if (text.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES) {
             throw BackupException("Backup file is too large.")
         }
+        // Audit #7 AUD-001: reject hostile nesting BEFORE the
+        // recursive-descent parser sees it — its failure mode
+        // is a StackOverflowError, which catch (e: Exception)
+        // below cannot convert into a BackupException.
+        if (JsonDepth.exceeds(text, MAX_JSON_DEPTH)) {
+            throw BackupException("Backup file is too deeply nested.")
+        }
         val root = try {
             Json.parseToJsonElement(text).jsonObject
+        } catch (e: StackOverflowError) {
+            throw BackupException("Backup file is too deeply nested.")
         } catch (e: Exception) {
             throw BackupException("Backup file is not valid JSON.")
         }
         if (root["format"]?.jsonPrimitive?.contentOrNull != BACKUP_FORMAT) {
             throw BackupException("Not a TermBridge backup file.")
         }
+        // Audit #7 AUD-002: a quoted "1" is not the number 1 —
+        // strict primitive typing at the envelope level too.
         val version = try {
-            root["version"]?.jsonPrimitive?.int
+            (root["version"] as? JsonPrimitive)?.takeIf { !it.isString }?.int
         } catch (e: Exception) {
             null
         }
         if (version != BACKUP_VERSION) {
             throw BackupException("Unsupported backup version.")
         }
-        val encrypted = root["encrypted"]?.let { element ->
+        val encryptedElement = root["encrypted"]
+        val encrypted = if (encryptedElement is JsonPrimitive && !encryptedElement.isString) {
             try {
-                element.jsonPrimitive.content.toBooleanStrict()
+                encryptedElement.content.toBooleanStrict()
             } catch (e: Exception) {
                 throw BackupException("Backup file has an invalid encrypted flag.")
             }
-        } ?: throw BackupException("Backup file has an invalid encrypted flag.")
+        } else {
+            throw BackupException("Backup file has an invalid encrypted flag.")
+        }
         val payloadText: String
         if (encrypted) {
             checkKeys(root, envelopeEncryptedKeys, envelopeEncryptedKeys, "envelope")
+            val iterations = try {
+                (root["iterations"] as? JsonPrimitive)?.takeIf { !it.isString }?.int
+            } catch (e: Exception) {
+                null
+            }
             if (root["kdf"]?.jsonPrimitive?.contentOrNull != ExportCrypto.KDF_ALGORITHM ||
-                root["iterations"]?.jsonPrimitive?.int != ExportCrypto.ITERATIONS
+                iterations != ExportCrypto.ITERATIONS
             ) {
                 throw BackupException("Unsupported backup encryption parameters.")
             }
@@ -431,8 +460,16 @@ object BackupCodec {
         encrypted: Boolean
     ): Pair<BackupDocument, List<String>> {
         val warnings = mutableListOf<String>()
+        // Audit #7 AUD-001: same depth guard as the envelope —
+        // this parse sees the DECRYPTED text, which the
+        // envelope-level guard never inspected.
+        if (JsonDepth.exceeds(text, MAX_JSON_DEPTH)) {
+            throw BackupException("Backup payload is too deeply nested.")
+        }
         val root = try {
             Json.parseToJsonElement(text).jsonObject
+        } catch (e: StackOverflowError) {
+            throw BackupException("Backup payload is too deeply nested.")
         } catch (e: Exception) {
             throw BackupException("Backup payload is not valid JSON.")
         }
@@ -549,12 +586,18 @@ object BackupCodec {
             } catch (e: Exception) {
                 throw BackupException("Backup transcript entry is malformed.")
             }
-            val label = obj["hostLabel"]?.jsonPrimitive?.content
+            // Audit #7 AUD-002b: strict string typing — a JSON
+            // null here used to decode as the literal text
+            // "null" via .content.
+            val label = (obj["hostLabel"] as? JsonPrimitive)?.takeIf { it.isString }?.content
                 ?: throw BackupException("Backup transcript is missing its host label.")
-            val text = obj["text"]?.jsonPrimitive?.content
+            val text = (obj["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content
                 ?: throw BackupException("Backup transcript is missing its text.")
             if (label.isBlank()) {
                 throw BackupException("Backup transcript has a blank host label.")
+            }
+            if (label.length > MAX_SHORT_FIELD_CHARS) {
+                throw BackupException("Backup transcript host label is too long.")
             }
             if (text.length > com.pishi.termbridge.domain.MAX_TRANSCRIPT_CHARS) {
                 throw BackupException("Backup transcript is too large.")
@@ -581,7 +624,7 @@ object BackupCodec {
                 throw BackupException("Invalid $where.")
             }
             checkKeys(obj, keychainEntryKeys, keychainEntryKeys, where)
-            val label = obj.reqString("label", where)
+            val label = obj.reqString("label", where, MAX_SHORT_FIELD_CHARS)
             val labelIssues = KeychainValidator.validateLabel(label)
             if (labelIssues.isNotEmpty()) {
                 throw BackupException("Invalid label in $where: ${labelIssues.first().message}")
@@ -656,17 +699,17 @@ object BackupCodec {
         }
         checkKeys(obj, hostKeys, hostRequiredKeys, where)
         val exportId = obj.reqInt("exportId", where)
-        val name = obj.reqString("name", where)
-        val hostname = obj.reqString("hostname", where)
+        val name = obj.reqString("name", where, MAX_SHORT_FIELD_CHARS)
+        val hostname = obj.reqString("hostname", where, MAX_SHORT_FIELD_CHARS)
         val port = obj.reqInt("port", where)
-        val username = obj.reqString("username", where)
+        val username = obj.reqString("username", where, MAX_SHORT_FIELD_CHARS)
         val authType = try {
             AuthType.valueOf(obj.reqString("authType", where))
         } catch (e: Exception) {
             throw BackupException("Invalid authentication type in $where.")
         }
         val notes = obj.reqString("notes", where)
-        val tags = obj.reqString("tags", where)
+        val tags = obj.reqString("tags", where, MAX_SHORT_FIELD_CHARS)
         val hasCredential = obj.reqBoolean("hasCredential", where)
         val profile = HostProfile(
             name = name, hostname = hostname, port = port,
@@ -719,7 +762,16 @@ object BackupCodec {
         val tunnels = decodeTunnels(obj, where)
         val proxy = decodeProxy(obj, where)
         val hops = try {
-            obj["jumpHopExportIds"]?.jsonArray?.map { it.jsonPrimitive.int }
+            obj["jumpHopExportIds"]?.jsonArray?.map { element ->
+                // Audit #7 AUD-002: quoted ids are not ids.
+                val prim = element as? JsonPrimitive
+                if (prim == null || prim.isString) {
+                    throw BackupException("Invalid jump chain in $where.")
+                }
+                prim.int
+            }
+        } catch (e: BackupException) {
+            throw e
         } catch (e: Exception) {
             throw BackupException("Invalid jump chain in $where.")
         } ?: throw BackupException("Missing jump chain in $where.")
@@ -799,7 +851,9 @@ object BackupCodec {
                         "$where button #$index variable"
                     )
                     ExportVariable(
-                        name = variableObj.reqString("name", "$where button #$index variable"),
+                        name = variableObj.reqString(
+                            "name", "$where button #$index variable", MAX_SHORT_FIELD_CHARS
+                        ),
                         defaultValue = variableObj.reqString(
                             "defaultValue", "$where button #$index variable"
                         ),
@@ -814,13 +868,29 @@ object BackupCodec {
                 throw BackupException("Invalid button variables in $where.")
             } ?: throw BackupException("Invalid button variables in $where.")
             val steps = try {
-                buttonObj["steps"]?.jsonArray?.map { it.jsonPrimitive.content }
+                buttonObj["steps"]?.jsonArray?.map { element ->
+                    // Audit #7 AUD-002b: steps are strings; a
+                    // null/number/object step is a wrong type,
+                    // not the literal text "null".
+                    val prim = element as? JsonPrimitive
+                    if (prim == null || !prim.isString) {
+                        throw BackupException("Invalid button steps in $where.")
+                    }
+                    if (prim.content.length > MAX_FIELD_CHARS) {
+                        throw BackupException("Invalid button steps in $where.")
+                    }
+                    prim.content
+                }
+            } catch (e: BackupException) {
+                throw e
             } catch (e: Exception) {
                 throw BackupException("Invalid button steps in $where.")
             } ?: throw BackupException("Invalid button steps in $where.")
             val button = ExportButton(
-                label = buttonObj.reqString("label", "$where button #$index"),
-                category = buttonObj.reqString("category", "$where button #$index"),
+                label = buttonObj.reqString("label", "$where button #$index", MAX_SHORT_FIELD_CHARS),
+                category = buttonObj.reqString(
+                    "category", "$where button #$index", MAX_SHORT_FIELD_CHARS
+                ),
                 sortOrder = buttonObj.reqInt("sortOrder", "$where button #$index"),
                 mode = mode,
                 template = buttonObj.reqString("template", "$where button #$index"),
@@ -889,7 +959,7 @@ object BackupCodec {
                 throw BackupException("Invalid environment variable in $where.")
             }
             checkKeys(varObj, envVarKeys, envVarKeys, "$where env var #$index")
-            val name = varObj.reqString("name", "$where env var #$index")
+            val name = varObj.reqString("name", "$where env var #$index", MAX_SHORT_FIELD_CHARS)
             val value = varObj.reqString("value", "$where env var #$index")
             val nameIssue = EnvironmentValidator.validateEnvName(name)
             val valueIssue = EnvironmentValidator.validateEnvValue(value)
@@ -923,15 +993,21 @@ object BackupCodec {
             }
             val tunnel = ExportTunnel(
                 kind = kind,
-                bindAddress = tunnelObj.reqString("bindAddress", "$where tunnel #$index"),
+                bindAddress = tunnelObj.reqString(
+                    "bindAddress", "$where tunnel #$index", MAX_SHORT_FIELD_CHARS
+                ),
                 bindPort = tunnelObj.reqInt("bindPort", "$where tunnel #$index"),
-                targetHost = tunnelObj.reqString("targetHost", "$where tunnel #$index"),
+                targetHost = tunnelObj.reqString(
+                    "targetHost", "$where tunnel #$index", MAX_SHORT_FIELD_CHARS
+                ),
                 targetPort = tunnelObj.reqInt("targetPort", "$where tunnel #$index"),
                 allowNonLoopback = tunnelObj.reqBoolean(
                     "allowNonLoopback", "$where tunnel #$index"
                 ),
                 enabled = tunnelObj.reqBoolean("enabled", "$where tunnel #$index"),
-                label = tunnelObj.reqString("label", "$where tunnel #$index")
+                label = tunnelObj.reqString(
+                    "label", "$where tunnel #$index", MAX_SHORT_FIELD_CHARS
+                )
             )
             val issues = TunnelValidator.validate(
                 TunnelConfig(
@@ -968,7 +1044,7 @@ object BackupCodec {
         }
         val proxy = ExportProxy(
             kind = kind,
-            proxyHost = proxyObj.reqString("proxyHost", "$where proxy"),
+            proxyHost = proxyObj.reqString("proxyHost", "$where proxy", MAX_SHORT_FIELD_CHARS),
             proxyPort = proxyObj.reqInt("proxyPort", "$where proxy")
         )
         val issues = ProxySpecParser.validate(
@@ -998,45 +1074,74 @@ object BackupCodec {
 
     /** Optional nullable string: absent and JSON null both map
      *  to null (fields added after v1 files exist); any other
-     *  non-string type is a hard failure like everywhere else. */
+     *  non-string type is a hard failure like everywhere else.
+     *  Audit #7 AUD-002/003: the primitive must really be a
+     *  string (a bare number's .content used to pass), and the
+     *  value is length-capped like every decoded string. */
     private fun JsonObject.optString(key: String, where: String): String? {
         val element = this[key] ?: return null
         if (element is JsonNull) return null
-        return try {
-            element.jsonPrimitive.content
-        } catch (e: Exception) {
+        val prim = element as? JsonPrimitive
+        if (prim == null || !prim.isString) {
             throw BackupException("Field $key in $where has the wrong type.")
         }
+        if (prim.content.length > MAX_FIELD_CHARS) {
+            throw BackupException("Field $key in $where is too long.")
+        }
+        return prim.content
     }
 
     /** Optional boolean with the same contract as [optString]:
      *  absent or JSON null maps to false (fields added after v1
-     *  files exist); any non-boolean type is a hard failure. */
+     *  files exist); any non-boolean type — including a quoted
+     *  "true" — is a hard failure. */
     private fun JsonObject.optBoolean(key: String, where: String): Boolean {
         val element = this[key] ?: return false
         if (element is JsonNull) return false
+        val prim = element as? JsonPrimitive
+        if (prim == null || prim.isString) {
+            throw BackupException("Field $key in $where has the wrong type.")
+        }
         return try {
-            element.jsonPrimitive.content.toBooleanStrict()
+            prim.content.toBooleanStrict()
         } catch (e: Exception) {
             throw BackupException("Field $key in $where has the wrong type.")
         }
     }
 
-    private fun JsonObject.reqString(key: String, where: String): String {
+    /** Required string. Audit #7 AUD-002b: JSON null is a wrong
+     *  type, never the literal text "null" (JsonNull.content).
+     *  Audit #7 AUD-003: [maxLength] caps the decoded value —
+     *  short single-line fields pass MAX_SHORT_FIELD_CHARS. */
+    private fun JsonObject.reqString(
+        key: String,
+        where: String,
+        maxLength: Int = MAX_FIELD_CHARS
+    ): String {
         val element = this[key]
             ?: throw BackupException("Missing field in $where: $key.")
-        return try {
-            element.jsonPrimitive.content
-        } catch (e: Exception) {
+        val prim = element as? JsonPrimitive
+        if (prim == null || element is JsonNull || !prim.isString) {
             throw BackupException("Field $key in $where has the wrong type.")
         }
+        if (prim.content.length > maxLength) {
+            throw BackupException("Field $key in $where is too long.")
+        }
+        return prim.content
     }
 
+    /** Required int. Audit #7 AUD-002: a quoted "22" is a
+     *  string, not an int — JsonPrimitive.int parses string
+     *  content, so the primitive's kind is checked first. */
     private fun JsonObject.reqInt(key: String, where: String): Int {
         val element = this[key]
             ?: throw BackupException("Missing field in $where: $key.")
+        val prim = element as? JsonPrimitive
+        if (prim == null || element is JsonNull || prim.isString) {
+            throw BackupException("Field $key in $where has the wrong type.")
+        }
         return try {
-            element.jsonPrimitive.int
+            prim.int
         } catch (e: Exception) {
             throw BackupException("Field $key in $where has the wrong type.")
         }
@@ -1045,8 +1150,12 @@ object BackupCodec {
     private fun JsonObject.reqBoolean(key: String, where: String): Boolean {
         val element = this[key]
             ?: throw BackupException("Missing field in $where: $key.")
+        val prim = element as? JsonPrimitive
+        if (prim == null || element is JsonNull || prim.isString) {
+            throw BackupException("Field $key in $where has the wrong type.")
+        }
         return try {
-            element.jsonPrimitive.content.toBooleanStrict()
+            prim.content.toBooleanStrict()
         } catch (e: Exception) {
             throw BackupException("Field $key in $where has the wrong type.")
         }

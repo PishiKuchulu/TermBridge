@@ -3,6 +3,7 @@ package com.pishi.termbridge
 import com.pishi.termbridge.domain.AppUpdateChecker
 import com.pishi.termbridge.domain.LatestReleaseFetcher
 import com.pishi.termbridge.domain.UpdateCheckResult
+import com.pishi.termbridge.domain.readCapped
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -189,6 +190,35 @@ class AppUpdateCheckerTest {
         assertEquals(
             UpdateCheckResult.CheckFailed,
             AppUpdateChecker.check("0.1.0", fetcher)
+        )
+    }
+
+    // ---- Audit #7 AUD-004: capped response read + depth guard ----
+
+    @Test
+    fun cappedReadReturnsShortBody() {
+        val body = "{\"tag_name\":\"v9.9.9\"}"
+        assertEquals(body, readCapped(body.byteInputStream(), 1024))
+    }
+
+    @Test
+    fun cappedReadAcceptsExactlyTheCap() {
+        val body = "x".repeat(1024)
+        assertEquals(body, readCapped(body.byteInputStream(), 1024))
+    }
+
+    @Test
+    fun cappedReadRejectsOversizedBody() {
+        val body = "x".repeat(5000)
+        assertEquals(null, readCapped(body.byteInputStream(), 1024))
+    }
+
+    @Test
+    fun deeplyNestedPayloadFailsTheCheck() {
+        val nested = "[".repeat(500) + "]".repeat(500)
+        assertEquals(
+            UpdateCheckResult.CheckFailed,
+            AppUpdateChecker.evaluate("0.1.0", nested)
         )
     }
 }

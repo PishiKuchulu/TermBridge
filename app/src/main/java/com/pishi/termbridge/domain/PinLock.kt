@@ -63,4 +63,49 @@ object PinLock {
         failures < 10 -> 120_000L
         else -> 600_000L
     }
+
+    /**
+     * Remaining app-lock throttle in ms (audit #7 AUD-005),
+     * computed from BOTH clocks. The wall clock alone is
+     * user-settable: moving it backward used to stretch a
+     * 30 s wait by however far the clock moved, and forward
+     * could erase the wait entirely.
+     *
+     * Anchors persisted when the throttle was imposed:
+     * [untilWall] (the wall deadline), [setWall] / [setElapsed]
+     * (wall / monotonic readings at impose time) and [waitMs]
+     * (the imposed wait). [sameBoot] says the monotonic clock
+     * still belongs to the boot that imposed the throttle.
+     *
+     * - Same boot: the remaining time derives from the
+     *   monotonic clock only — wall changes in either
+     *   direction are ignored.
+     * - After a reboot: the monotonic anchor is meaningless,
+     *   so the wall deadline rules, CLAMPED to [waitMs] — a
+     *   backward jump can never stretch the wait past what
+     *   was imposed (a forward jump can still end it early;
+     *   the PBKDF2 cost, not the throttle, is the real barrier
+     *   against guessing).
+     * - Legacy state (written before the anchors existed):
+     *   the historical wall-only behaviour, for that one
+     *   already-running throttle only.
+     */
+    fun throttleRemainingMs(
+        nowWall: Long,
+        nowElapsed: Long,
+        untilWall: Long,
+        setWall: Long,
+        setElapsed: Long,
+        waitMs: Long,
+        sameBoot: Boolean
+    ): Long {
+        if (untilWall <= 0L) return 0L
+        if (setWall <= 0L || waitMs <= 0L) {
+            return (untilWall - nowWall).coerceAtLeast(0L)
+        }
+        if (sameBoot) {
+            return (waitMs - (nowElapsed - setElapsed)).coerceAtLeast(0L)
+        }
+        return (untilWall - nowWall).coerceIn(0L, waitMs)
+    }
 }

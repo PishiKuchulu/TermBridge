@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import com.pishi.termbridge.R
@@ -205,7 +206,11 @@ fun DiscoverScreen(
                 progress = { if (state.total == 0) 0f else state.done.toFloat() / state.total },
                 modifier = Modifier.fillMaxWidth()
             )
-            Text(stringResource(R.string.discover_scanning, state.done, state.total))
+            Text(
+                pluralStringResource(
+                    R.plurals.discover_scanning, state.total, state.done, state.total
+                )
+            )
         }
         if (state.noNetwork) {
             Text(stringResource(R.string.discover_no_network), color = MaterialTheme.colorScheme.error)

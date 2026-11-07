@@ -60,6 +60,11 @@ data class TunnelEntity(
     ],
     indices = [
         Index("targetHostId"),
+        // Audit #7 AUD-006: jumpHostId is a foreign key too;
+        // without its own leading index, lookups by jump host
+        // (delete/replace cleanup) scan the table — the exact
+        // warning Room's compiler raised.
+        Index("jumpHostId"),
         Index(value = ["targetHostId", "jumpHostId"], unique = true)
     ]
 )

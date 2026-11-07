@@ -3,10 +3,6 @@
     <string name="app_name">TermBridge</string>
 
     <!-- Navigation labels -->
-    <string name="nav_hosts">Hosts</string>
-    <string name="nav_files">Files</string>
-    <string name="nav_commands">Commands</string>
-    <string name="nav_desktop">Desktop</string>
     <string name="nav_settings">Settings</string>
     <string name="action_back">Back</string>
     <string name="action_add_host">Add host</string>
@@ -57,9 +53,15 @@
     <string name="hosts_sort_recently_added">Recently added</string>
     <string name="hosts_filter_all_tags">All tags</string>
     <string name="hosts_action_select">Select hosts</string>
-    <string name="hosts_selected_count">%1$d selected</string>
+    <plurals name="hosts_selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
     <string name="hosts_delete_selected_title">Delete selected hosts?</string>
-    <string name="hosts_delete_selected_body">Delete %1$d hosts? Their saved credentials and settings will be removed. This cannot be undone.</string>
+    <plurals name="hosts_delete_selected_body">
+        <item quantity="one">Delete %1$d host? Their saved credentials and settings will be removed. This cannot be undone.</item>
+        <item quantity="other">Delete %1$d hosts? Their saved credentials and settings will be removed. This cannot be undone.</item>
+    </plurals>
     <string name="hosts_no_match">No hosts match this search.</string>
     <string name="hosts_group_ungrouped">Ungrouped</string>
     <string name="hosts_favorite">Mark as favorite</string>
@@ -130,13 +132,22 @@
     <string name="files_sort_type">Type</string>
     <string name="files_show_hidden">Hidden</string>
     <string name="files_action_select">Select</string>
-    <string name="files_selected_count">%1$d selected</string>
+    <plurals name="files_selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
     <string name="files_download_selected">Download</string>
     <string name="files_bulk_download_needs_folder">Bulk download needs a local folder for this host (set it in the host environment).</string>
     <string name="files_delete_selected_title">Delete selected items?</string>
-    <string name="files_delete_selected_body">%1$d item(s) will be deleted from the server.</string>
+    <plurals name="files_delete_selected_body">
+        <item quantity="one">%1$d item will be deleted from the server.</item>
+        <item quantity="other">%1$d items will be deleted from the server.</item>
+    </plurals>
     <string name="files_upload_folder">Upload folder</string>
-    <string name="files_queue_more">%1$d more in queue</string>
+    <plurals name="files_queue_more">
+        <item quantity="one">%1$d more in queue</item>
+        <item quantity="other">%1$d more in queue</item>
+    </plurals>
     <string name="files_resume_download">Download of %1$s stopped at %2$s.</string>
     <string name="files_resume_upload">Upload of %1$s was cancelled and can resume.</string>
     <string name="files_resume">Resume</string>
@@ -221,7 +232,10 @@
     <string name="commands_risky_body">This command was flagged as potentially destructive, privilege-escalating, or disruptive. Detection is a heuristic and can miss dangerous commands, so check the command yourself before running it.</string>
     <string name="commands_risky_reasons_label">Why it was flagged:</string>
     <string name="commands_risky_run_anyway">Run anyway</string>
-    <string name="commands_sequence_progress">Sequence: step %1$d of %2$d sent</string>
+    <plurals name="commands_sequence_progress">
+        <item quantity="one">Sequence: step %1$d of %2$d sent</item>
+        <item quantity="other">Sequence: step %1$d of %2$d sent</item>
+    </plurals>
     <string name="commands_sequence_stopped">Sequence stopped after step %1$d of %2$d. Steps already sent keep running on the server.</string>
     <string name="commands_session_buttons_title">Command buttons for this host</string>
     <string name="commands_session_buttons_note">Insert places text in the terminal without running it. Run sends it to the live terminal. Nothing runs until you tap Run or Insert.</string>
@@ -347,15 +361,6 @@
 
     <!-- Desktop -->
     <string name="desktop_title">Remote desktop</string>
-    <string name="desktop_body">Remote desktop is conditional, not promised. RDP is blocked by the prompt 12 proof gate: no RDP connection has been demonstrated yet. VNC has a protocol core implemented but no session yet: it has never connected to a real VNC server. See the rows below for the exact state and what would unblock each.</string>
-    <string name="desktop_rdp">Windows (RDP)</string>
-    <string name="desktop_rdp_blocked">Blocked by the prompt 12 proof-of-concept gate: no RDP connection has been demonstrated yet. FreeRDP is the only candidate, but it ships no Android library — its native code must be built from source with the Android NDK, and this environment has no NDK, no CI build, and no Windows endpoint to test against.</string>
-    <string name="desktop_rdp_library">Candidate: FreeRDP 3.x, actively maintained, with an Android port updated in recent releases. Its core is Apache-2.0; the full licence inventory for the exact linked components is still open and must come from the FreeRDP source tree at integration time.</string>
-    <string name="desktop_rdp_unblock">What would unblock it: a CI machine with the NDK that builds the FreeRDP native libraries for the target ABIs, a licence inventory for the exact linked components, and a real connection to a compatible Windows endpoint — Pro, Enterprise, or Education with Remote Desktop enabled. Windows Home cannot host a Remote Desktop session.</string>
-    <string name="desktop_vnc">Linux (VNC)</string>
-    <string name="desktop_vnc_core">Protocol core implemented, session not yet available: a pure-Kotlin RFB client core is in the app — protocol versions 3.3, 3.7 and 3.8, No Authentication and VNC Authentication, and Raw, CopyRect, RRE, CoRRE and Hextile framebuffer decoding — with unit tests for the protocol logic. It has never connected to a real VNC server.</string>
-    <string name="desktop_vnc_blocked">Blocked by the prompt 13 proof-of-concept gate for a session: the pack requires a proven connection against a controlled compatible server before full integration, and this environment has no controlled Linux VNC server, no device, and no CI run to prove against. Tight, ZRLE, TRLE and encrypted authentication (VeNCrypt, TLS, X.509) are not implemented and are refused cleanly, never silently downgraded. VNC Authentication itself is weak by design and must only be used on a trusted network or through an SSH tunnel.</string>
-    <string name="desktop_vnc_unblock">What would unblock it: a controlled Linux VNC server (for example TigerVNC or x11vnc) with documented version, authentication and encodings, a real connection from a device build proving the handshake, authentication and framebuffer updates end to end, and a session screen with scaling, pointer and keyboard input — only then a connect button.</string>
 
     <!-- Backup / Import / Export -->
     <string name="backup_title">Import / Export</string>
@@ -384,7 +389,10 @@
     <string name="backup_replace_checkbox">Replace the existing hosts listed above</string>
     <string name="backup_replace_note">Without this option, conflicting hosts are skipped and the existing hosts are left untouched. With it, the existing host and its buttons, settings, and tunnels are replaced — but its credential is replaced only when this backup contains one.</string>
     <string name="backup_replace_title">Replace existing hosts?</string>
-    <string name="backup_replace_body">This will replace %1$d existing host(s). A credential is replaced only when this backup contains one; otherwise the existing credential is kept.</string>
+    <plurals name="backup_replace_body">
+        <item quantity="one">This will replace %1$d existing host. A credential is replaced only when this backup contains one; otherwise the existing credential is kept.</item>
+        <item quantity="other">This will replace %1$d existing hosts. A credential is replaced only when this backup contains one; otherwise the existing credential is kept.</item>
+    </plurals>
     <string name="backup_replace_confirm">Replace</string>
     <string name="backup_import_apply">Import</string>
     <string name="backup_result_title">Import result</string>
@@ -394,8 +402,6 @@
 
     <!-- Settings / Diagnostics / About -->
     <string name="settings_title">Settings</string>
-    <string name="settings_note">Settings that change behaviour arrive with the features they control. For now this screen only leads to diagnostics and about information, and the app follows the system theme.</string>
-    <string name="settings_secure_note">Screenshots and screen recordings are blocked in this app, so terminal content cannot appear in the Recents overview. This also means you cannot screenshot the app yourself.</string>
     <string name="diagnostics_title">Diagnostics</string>
     <string name="diagnostics_app_version">App version: 0.1.0-foundation</string>
     <!-- Prompt 14 fix: the old text claimed no session feature
@@ -421,7 +427,10 @@
     <string name="terminal_key_fn">Fn</string>
     <string name="terminal_enter_fullscreen">Expand the terminal to full screen</string>
     <string name="terminal_exit_fullscreen">Exit full-screen terminal</string>
-    <string name="terminal_jump_to_latest">Jump to latest (%1$d new lines)</string>
+    <plurals name="terminal_jump_to_latest">
+        <item quantity="one">Jump to latest (%1$d new line)</item>
+        <item quantity="other">Jump to latest (%1$d new lines)</item>
+    </plurals>
     <string name="terminal_output_description">Terminal output</string>
     <string name="session_live_indicator">Live session — return to terminal</string>
 
@@ -457,10 +466,16 @@
     <string name="settings_font_size">Font size</string>
     <string name="settings_font_size_value">%1$d sp</string>
     <string name="settings_scrollback">Scrollback buffer</string>
-    <string name="settings_scrollback_value">%1$d lines</string>
+    <plurals name="settings_scrollback_value">
+        <item quantity="one">%1$d line</item>
+        <item quantity="other">%1$d lines</item>
+    </plurals>
     <string name="settings_scrollback_hint">Tap to set any value. Applies to the next session.</string>
     <string name="settings_scrollback_estimate">≈ %1$s of memory</string>
-    <string name="settings_scrollback_bounds">Between %1$d and %2$d lines.</string>
+    <plurals name="settings_scrollback_bounds">
+        <item quantity="one">Between %1$d and %2$d line.</item>
+        <item quantity="other">Between %1$d and %2$d lines.</item>
+    </plurals>
     <string name="settings_keepalive_misses">Drop connection after missed heartbeats</string>
     <string name="settings_keepalive_misses_value">%1$d in a row</string>
     <string name="settings_keepalive_misses_hint">The app probes the server itself; after this many unanswered probes in a row it disconnects instead of hanging on a dead connection.</string>
@@ -470,7 +485,10 @@
     <string name="settings_keep_screen_on_hint">Prevents the display from sleeping while the terminal is open.</string>
     <string name="settings_keepalive">Keep-alive interval</string>
     <string name="settings_keepalive_off">Off</string>
-    <string name="settings_keepalive_value">%1$d seconds</string>
+    <plurals name="settings_keepalive_value">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
     <string name="settings_keepalive_hint">Sends a heartbeat so idle connections are not dropped. Applies to the next connection.</string>
     <string name="settings_block_screenshots">Block screenshots and screen recording</string>
     <string name="settings_block_screenshots_hint">Hides terminal content from screenshots and the Recents preview.</string>
@@ -522,9 +540,18 @@
     <string name="host_form_keychain_entry">Keychain entry</string>
     <string name="host_form_keychain_none_of_kind">No keychain entry matches this sign-in type. Add one from Vault → Keychain first.</string>
     <string name="host_form_keychain_note">The credential comes from the keychain entry. Changing it later updates every host linked to it.</string>
-    <string name="backup_preview_keychain">This backup also contains %1$d keychain entries.</string>
-    <string name="backup_preview_snippets">This backup also contains %1$d global snippets.</string>
-    <string name="backup_preview_transcripts">This backup also contains %1$d session transcripts.</string>
+    <plurals name="backup_preview_keychain">
+        <item quantity="one">This backup also contains %1$d keychain entry.</item>
+        <item quantity="other">This backup also contains %1$d keychain entries.</item>
+    </plurals>
+    <plurals name="backup_preview_snippets">
+        <item quantity="one">This backup also contains %1$d global snippet.</item>
+        <item quantity="other">This backup also contains %1$d global snippets.</item>
+    </plurals>
+    <plurals name="backup_preview_transcripts">
+        <item quantity="one">This backup also contains %1$d session transcript.</item>
+        <item quantity="other">This backup also contains %1$d session transcripts.</item>
+    </plurals>
     <string name="connections_quick_hint">Search or \"ssh user@hostname -p port\"</string>
     <string name="connections_quick_action">Connect</string>
     <string name="connections_quick_invalid">Enter a host, user@host:port, or an ssh command.</string>
@@ -552,7 +579,10 @@
     <string name="logs_outcome_failed">Failed</string>
     <string name="logs_outcome_closed">Session ended (%1$s)</string>
     <string name="discover_scan">Scan network</string>
-    <string name="discover_scanning">Scanning %1$d of %2$d addresses…</string>
+    <plurals name="discover_scanning">
+        <item quantity="one">Scanning %1$d of %2$d address…</item>
+        <item quantity="other">Scanning %1$d of %2$d addresses…</item>
+    </plurals>
     <string name="discover_hint">Looks for SSH (22), VNC (5900) and RDP (3389) on your local subnet only.</string>
     <string name="discover_none">Nothing found on this network.</string>
     <string name="discover_no_network">No local network address available. Connect to Wi-Fi first.</string>
@@ -595,7 +625,10 @@
     <string name="history_import_body">This reads the history files of your shell on the connected server (~/.bash_history, ~/.zsh_history, fish history) over a separate channel — nothing is typed into the session. Lines that look like secrets are filtered out, and the result is stored only on this device for autocomplete.</string>
     <string name="history_import_confirm">Import</string>
     <string name="history_import_preview_title">Review shell history import</string>
-    <string name="history_import_preview_body">%1$d commands passed the filters. Only these lines will be stored on this device for autocomplete — the first ones are:</string>
+    <plurals name="history_import_preview_body">
+        <item quantity="one">%1$d command passed the filters. Only these lines will be stored on this device for autocomplete — the first ones are:</item>
+        <item quantity="other">%1$d commands passed the filters. Only these lines will be stored on this device for autocomplete — the first ones are:</item>
+    </plurals>
     <string name="shake_confirm_disconnect_title">Disconnect?</string>
     <string name="shake_confirm_disconnect_body">A shake was detected, and shaking is set to disconnect this session. Disconnect now?</string>
     <string name="shake_confirm_clear_title">Clear the screen?</string>
@@ -611,7 +644,10 @@
     <string name="lock_pin_hint">PIN</string>
     <string name="lock_unlock">Unlock</string>
     <string name="lock_wrong">Wrong PIN.</string>
-    <string name="lock_throttled">Too many attempts. Try again in %1$d seconds.</string>
+    <plurals name="lock_throttled">
+        <item quantity="one">Too many attempts. Try again in %1$d second.</item>
+        <item quantity="other">Too many attempts. Try again in %1$d seconds.</item>
+    </plurals>
     <string name="lock_use_biometric">Use fingerprint or face</string>
     <string name="lock_biometric_title">Unlock TermBridge</string>
     <string name="settings_section_lock">App lock</string>
@@ -648,7 +684,6 @@
     <string name="settings_cover_recents">Cover in recents</string>
     <string name="settings_cover_recents_hint">Blanks the app\'s card in the recent-apps list while the lock is on.</string>
     <string name="lock_now">Lock now</string>
-    <string name="settings_pin_lock_off">Off</string>
     <string name="settings_pin_lock_note">Keeps casual users out of an unlocked phone. Saved credentials are encrypted by the Android Keystore either way.</string>
     <string name="settings_biometric">Fingerprint / face unlock</string>
     <string name="settings_biometric_unavailable">Not available on this device, or none enrolled.</string>
@@ -738,12 +773,30 @@
     <string name="files_error_open_destination">Could not open the destination file.</string>
     <string name="files_error_download_failed">Download failed. Please try again.</string>
     <string name="files_info_workdir_fallback">Working directory not available — started at root.</string>
-    <string name="files_info_deleted">Deleted %1$d item(s).</string>
-    <string name="files_info_deleted_partial">Deleted %1$d item(s); %2$d could not be deleted.</string>
-    <string name="files_info_queued_downloads">Queued %1$d download(s).</string>
-    <string name="files_info_queued_uploads">Queued %1$d upload(s).</string>
-    <string name="files_info_queued_uploads_skipped">Queued %1$d upload(s); %2$d skipped (name already exists).</string>
-    <string name="files_info_queued_uploads_folder">Queued %1$d upload(s) from the folder.</string>
+    <plurals name="files_info_deleted">
+        <item quantity="one">Deleted %1$d item.</item>
+        <item quantity="other">Deleted %1$d items.</item>
+    </plurals>
+    <plurals name="files_info_deleted_partial">
+        <item quantity="one">Deleted %1$d item; %2$d could not be deleted.</item>
+        <item quantity="other">Deleted %1$d items; %2$d could not be deleted.</item>
+    </plurals>
+    <plurals name="files_info_queued_downloads">
+        <item quantity="one">Queued %1$d download.</item>
+        <item quantity="other">Queued %1$d downloads.</item>
+    </plurals>
+    <plurals name="files_info_queued_uploads">
+        <item quantity="one">Queued %1$d upload.</item>
+        <item quantity="other">Queued %1$d uploads.</item>
+    </plurals>
+    <plurals name="files_info_queued_uploads_skipped">
+        <item quantity="one">Queued %1$d upload; %2$d skipped (name already exists).</item>
+        <item quantity="other">Queued %1$d uploads; %2$d skipped (name already exists).</item>
+    </plurals>
+    <plurals name="files_info_queued_uploads_folder">
+        <item quantity="one">Queued %1$d upload from the folder.</item>
+        <item quantity="other">Queued %1$d uploads from the folder.</item>
+    </plurals>
     <string name="session_error_terminal_start">Terminal could not start on this connection.</string>
     <string name="session_shell_closed">Shell closed by the server.</string>
     <string name="session_connection_lost">Connection lost.</string>
@@ -751,8 +804,14 @@
     <string name="history_import_needs_session">History import needs a live session.</string>
     <string name="history_import_running">Importing shell history…</string>
     <string name="history_import_failed">Shell history import failed.</string>
-    <string name="history_import_done">Imported %1$d new commands (%2$d usable lines read).</string>
-    <string name="backup_error_passphrase_too_short">Passphrase must be at least %1$d characters.</string>
+    <plurals name="history_import_done">
+        <item quantity="one">Imported %1$d new command (%2$d usable lines read).</item>
+        <item quantity="other">Imported %1$d new commands (%2$d usable lines read).</item>
+    </plurals>
+    <plurals name="backup_error_passphrase_too_short">
+        <item quantity="one">Passphrase must be at least %1$d character.</item>
+        <item quantity="other">Passphrase must be at least %1$d characters.</item>
+    </plurals>
     <string name="backup_error_passphrase_mismatch">Passphrases do not match.</string>
     <string name="backup_error_create_failed">Could not create the export.</string>
     <string name="backup_error_save_failed">Could not save the export.</string>

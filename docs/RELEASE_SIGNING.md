@@ -42,6 +42,13 @@ supplies them from GitHub Actions secrets.
 
 ## Notes
 
+- Signature scheme (audit #7 AUD-017): release APKs carry
+  an APK Signature Scheme v2 signature only — no v1 (JAR)
+  signature, which nothing needs at minSdk 26, and no v3,
+  whose added value is key rotation. That is a deliberate,
+  accepted position, not an oversight: if the release key
+  ever has to rotate, enabling v3 signing becomes part of
+  that event, before the old key is retired.
 - The debug builds from `android-ci.yml` are unaffected and
   keep using the auto-generated debug key.
 - R8 keep rules live in `app/proguard-rules.pro`. The

@@ -77,4 +77,83 @@ class PinLockTest {
         assertFalse(PinLock.verify("4322", salt, legacy, iterations = PinLock.LEGACY_ITERATIONS))
         assertFalse(PinLock.verify("4322", salt, legacy))
     }
+
+    // ---- Audit #7 AUD-005: throttle clock math ----
+    // Imposed at wall 1_000_000 / elapsed 500_000, wait 30 s,
+    // wall deadline 1_030_000.
+
+    private fun remaining(
+        nowWall: Long,
+        nowElapsed: Long,
+        sameBoot: Boolean,
+        untilWall: Long = 1_030_000L,
+        setWall: Long = 1_000_000L,
+        setElapsed: Long = 500_000L,
+        waitMs: Long = 30_000L
+    ): Long = PinLock.throttleRemainingMs(
+        nowWall, nowElapsed, untilWall, setWall, setElapsed, waitMs, sameBoot
+    )
+
+    @Test
+    fun throttleFollowsMonotonicClockWithinBoot() {
+        assertEquals(20_000L, remaining(nowWall = 1_010_000L, nowElapsed = 510_000L, sameBoot = true))
+    }
+
+    @Test
+    fun backwardWallJumpDoesNotStretchThrottle() {
+        // The audit's scenario: wall clock moved back a day
+        // after the throttle was imposed; only 10 s passed.
+        assertEquals(
+            20_000L,
+            remaining(nowWall = 1_000_000L - 86_400_000L, nowElapsed = 510_000L, sameBoot = true)
+        )
+    }
+
+    @Test
+    fun forwardWallJumpDoesNotEraseThrottle() {
+        assertEquals(
+            20_000L,
+            remaining(nowWall = 9_999_999_999L, nowElapsed = 510_000L, sameBoot = true)
+        )
+    }
+
+    @Test
+    fun throttleExpiresByMonotonicClock() {
+        assertEquals(0L, remaining(nowWall = 1_010_000L, nowElapsed = 531_000L, sameBoot = true))
+    }
+
+    @Test
+    fun afterRebootBackwardJumpIsClampedToImposedWait() {
+        // Post-reboot the wall clock rules, but a backward jump
+        // can never stretch the wait past the imposed 30 s.
+        assertEquals(
+            30_000L,
+            remaining(nowWall = 1_000_000L - 86_400_000L, nowElapsed = 5_000L, sameBoot = false)
+        )
+    }
+
+    @Test
+    fun afterRebootWallDeadlineStillApplies() {
+        assertEquals(20_000L, remaining(nowWall = 1_010_000L, nowElapsed = 5_000L, sameBoot = false))
+    }
+
+    @Test
+    fun legacyStateWithoutAnchorsUsesWallClock() {
+        assertEquals(
+            20_000L,
+            PinLock.throttleRemainingMs(
+                nowWall = 1_010_000L, nowElapsed = 510_000L,
+                untilWall = 1_030_000L, setWall = 0L, setElapsed = 0L,
+                waitMs = 0L, sameBoot = true
+            )
+        )
+    }
+
+    @Test
+    fun noThrottleIsZero() {
+        assertEquals(
+            0L,
+            PinLock.throttleRemainingMs(1_000L, 1_000L, 0L, 0L, 0L, 0L, sameBoot = true)
+        )
+    }
 }

@@ -9,7 +9,7 @@ import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
 **Status: signed releases ship from this tree.** Version
-`0.1.1-foundation` (versionCode 2), database v10. CI went
+`0.1.2-foundation` (versionCode 3), database v11. CI went
 green for the first time on 2026-10-25 (run #13: unit tests
 + debug assemble + emulator instrumented tests). Since then:
 the 9-phase security remediation and the review-2 fix wave
@@ -18,7 +18,9 @@ Termius-parity phases added settings/themes, Vault
 navigation, an app lock and a VNC screen (see
 `docs/PARITY_PHASES.md`), and signed releases v0.1.0 /
 v0.1.1 were published from tags (signature verified against
-the release keystore). Still open: on-device verification
+the release keystore); v0.1.2 — the audit #7 fix wave — is
+prepared in this tree and publishes the same way once its
+tag is cut. Still open: on-device verification
 runs and tier-2 integration tests. See
 `docs/RELEASE_NOTES.md` for the release gates.
 
@@ -136,7 +138,11 @@ tests skip via Assume.
 - Permissions: INTERNET + ACCESS_NETWORK_STATE in the app manifest, plus USE_BIOMETRIC and USE_FINGERPRINT contributed to the merged manifest by the AndroidX biometric library for the optional app lock (verified against the biometric 1.1.0 library manifest, 2026-11-04).
   `allowBackup=false` (export is the migration path);
   cleartext traffic forbidden; one exported activity
-  (the launcher); FLAG_SECURE on the app window.
+  (the launcher) and one exported receiver contributed by
+  the AndroidX profile-installer library
+  (ProfileInstallReceiver, guarded by the signature-level
+  DUMP permission — audit #7 AUD-018); FLAG_SECURE on the
+  app window.
 - Secrets: never plaintext, never logged, never
   hardcoded. Keystore loss means re-entering credentials.
 - Audits: `docs/SECURITY_AUDIT.md` (prompt 16, 13

@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -84,8 +85,9 @@ fun BackupScreen(
             title = { Text(stringResource(R.string.backup_replace_title)) },
             text = {
                 Text(
-                    stringResource(
-                        R.string.backup_replace_body,
+                    pluralStringResource(
+                        R.plurals.backup_replace_body,
+                        preview.conflicts.size,
                         preview.conflicts.size
                     )
                 )
@@ -225,24 +227,27 @@ fun BackupScreen(
             }
             if (preview.keychainCount > 0) {
                 Text(
-                    text = stringResource(
-                        R.string.backup_preview_keychain,
+                    text = pluralStringResource(
+                        R.plurals.backup_preview_keychain,
+                        preview.keychainCount,
                         preview.keychainCount
                     )
                 )
             }
             if (preview.snippetCount > 0) {
                 Text(
-                    text = stringResource(
-                        R.string.backup_preview_snippets,
+                    text = pluralStringResource(
+                        R.plurals.backup_preview_snippets,
+                        preview.snippetCount,
                         preview.snippetCount
                     )
                 )
             }
             if (preview.transcriptCount > 0) {
                 Text(
-                    text = stringResource(
-                        R.string.backup_preview_transcripts,
+                    text = pluralStringResource(
+                        R.plurals.backup_preview_transcripts,
+                        preview.transcriptCount,
                         preview.transcriptCount
                     )
                 )

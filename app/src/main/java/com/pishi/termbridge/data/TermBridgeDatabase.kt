@@ -6,14 +6,16 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
- * TermBridge database, version 9 (v5: prompt 18 adds the
+ * TermBridge database, version 11 (v5: prompt 18 adds the
  * shellConfirmed flag to host_settings; v6: the keychain —
  * a keychain_entries table plus a nullable keychainEntryId
  * reference on hosts, item T-01; v7: global snippets tables,
  * item T-02; v8: host list organization columns — favorite,
  * groupName, lastConnectedAt — item T-22; v9: the env-export
  * fallback opt-in on host_settings, item F-02; v10: the
- * session-transcript opt-ins on host_settings, item T-03).
+ * session-transcript opt-ins on host_settings, item T-03;
+ * v11: a leading index on jump_hops.jumpHostId, audit #7
+ * AUD-006).
  *
  * Migration decision (explicit, same as prompts 08–10): real
  * Migrations, NOT fallbackToDestructiveMigration, even though
@@ -26,7 +28,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *
  * Schema export is disabled (exportSchema = false): the schema is
  * small and versioned here, and a future migration will document
- * its schema change in its own prompt report.
+ * its schema change in its own prompt report. Audit #7 AUD-022
+ * revisited this and the decision stands, deliberately: migration
+ * correctness is proven on the JVM by MigrationSqlAuditTest,
+ * which mirrors every migration's SQL against the entity
+ * definitions, and Room's runtime schema validation still guards
+ * the real database on device — what exported JSON would add is
+ * MigrationTestHelper coverage, which needs a Gradle/KSP run to
+ * bootstrap the historical snapshots. Revisit if migrations ever
+ * grow beyond CREATE/ALTER/INDEX statements.
  */
 @Database(
     entities = [
@@ -45,7 +55,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SnippetStepEntity::class,
         SnippetVariableEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class TermBridgeDatabase : RoomDatabase() {
@@ -185,6 +195,22 @@ val MIGRATION_9_10: Migration = object : Migration(9, 10) {
         db.execSQL(
             "ALTER TABLE `host_settings` " +
                 "ADD COLUMN `sessionLogInBackup` INTEGER NOT NULL DEFAULT 0"
+        )
+    }
+}
+
+/**
+ * Audit #7 AUD-006: jump_hops.jumpHostId is a foreign key
+ * whose only index coverage was as the SECOND column of the
+ * unique (targetHostId, jumpHostId) index — useless for
+ * lookups by jump host alone, which is what Room warned
+ * about. Index-only migration; no table changes.
+ */
+val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_jump_hops_jumpHostId` " +
+                "ON `jump_hops` (`jumpHostId`)"
         )
     }
 }

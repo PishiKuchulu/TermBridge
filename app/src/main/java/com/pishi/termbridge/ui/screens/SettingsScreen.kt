@@ -1,6 +1,7 @@
 package com.pishi.termbridge.ui.screens
 
 import android.content.Intent
+import java.util.Locale
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -142,8 +144,10 @@ fun SettingsScreen(
             )
             ChoiceRow(
                 title = stringResource(R.string.settings_scrollback),
-                value = stringResource(
-                    R.string.settings_scrollback_value, settings.scrollbackLines
+                value = pluralStringResource(
+                    R.plurals.settings_scrollback_value,
+                    settings.scrollbackLines,
+                    settings.scrollbackLines
                 ) + " · " + stringResource(
                     R.string.settings_scrollback_estimate,
                     formatBytesShort(scrollbackMemoryEstimateBytes(settings.scrollbackLines))
@@ -355,7 +359,11 @@ fun SettingsScreen(
                 value = if (settings.keepAliveSeconds == 0) {
                     stringResource(R.string.settings_keepalive_off)
                 } else {
-                    stringResource(R.string.settings_keepalive_value, settings.keepAliveSeconds)
+                    pluralStringResource(
+                        R.plurals.settings_keepalive_value,
+                        settings.keepAliveSeconds,
+                        settings.keepAliveSeconds
+                    )
                 },
                 hint = stringResource(R.string.settings_keepalive_hint),
                 onClick = {
@@ -428,10 +436,12 @@ fun SettingsScreen(
     }
 }
 
-/** "1.5 MB" / "320 KB" for the scrollback estimate. */
+/** "1.5 MB" / "320 KB" for the scrollback estimate.
+ *  Locale.ROOT (audit #7 AUD-007): the decimal separator and
+ *  digits must not follow the device locale. */
 private fun formatBytesShort(bytes: Long): String = when {
-    bytes >= 1_000_000L -> String.format("%.1f MB", bytes / 1_000_000.0)
-    bytes >= 1_000L -> String.format("%d KB", bytes / 1_000L)
+    bytes >= 1_000_000L -> String.format(Locale.ROOT, "%.1f MB", bytes / 1_000_000.0)
+    bytes >= 1_000L -> String.format(Locale.ROOT, "%d KB", bytes / 1_000L)
     else -> "$bytes B"
 }
 
@@ -466,8 +476,9 @@ private fun ScrollbackDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
                 Text(
-                    text = stringResource(
-                        R.string.settings_scrollback_bounds,
+                    text = pluralStringResource(
+                        R.plurals.settings_scrollback_bounds,
+                        AppSettings.MAX_SCROLLBACK,
                         AppSettings.MIN_SCROLLBACK,
                         AppSettings.MAX_SCROLLBACK
                     ),

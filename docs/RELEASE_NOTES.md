@@ -13,6 +13,15 @@ see below).
 > signed releases v0.1.0 and v0.1.1 (GitHub Releases, tag builds
 > verified against the release keystore); read the status below
 > as the state at handoff time, not the current state.
+>
+> **Update (2026-11-08, audit #7 fix wave):** the tree now
+> carries version `0.1.2-foundation` (versionCode 3) and
+> database v11 (the jump_hops.jumpHostId index, AUD-006).
+> The audit #7 fixes — backup-import depth/length/typing
+> hardening, a capped update-check response read, monotonic
+> lock throttling, pluralized count strings, backup
+> extraction rules — are in this tree with their tests; the
+> signed v0.1.2 release publishes from its tag when cut.
 
 This tree is a **handoff, not a release**. No APK, no
 source ZIP, and no SHA-256 release hash is produced

@@ -33,9 +33,18 @@
     <string name="host_form_keychain_entry">ورودی دسته‌کلید</string>
     <string name="host_form_keychain_none_of_kind">هیچ ورودی دسته‌کلیدی با این نوع ورود جور نیست. اول از بخش خزانه ← دسته‌کلید یکی اضافه کنید.</string>
     <string name="host_form_keychain_note">اعتبارنامه از ورودی دسته‌کلید می‌آید. تغییرش در آینده، همه‌ی میزبان‌های پیوندخورده به آن را به‌روز می‌کند.</string>
-    <string name="backup_preview_keychain">این نسخه‌ی پشتیبان %1$d ورودی دسته‌کلید هم دارد.</string>
-    <string name="backup_preview_snippets">این نسخه‌ی پشتیبان %1$d اسنیپت سراسری هم دارد.</string>
-    <string name="backup_preview_transcripts">این نسخه‌ی پشتیبان %1$d رونوشت نشست هم دارد.</string>
+    <plurals name="backup_preview_keychain">
+        <item quantity="one">این نسخه‌ی پشتیبان %1$d ورودی دسته‌کلید هم دارد.</item>
+        <item quantity="other">این نسخه‌ی پشتیبان %1$d ورودی دسته‌کلید هم دارد.</item>
+    </plurals>
+    <plurals name="backup_preview_snippets">
+        <item quantity="one">این نسخه‌ی پشتیبان %1$d اسنیپت سراسری هم دارد.</item>
+        <item quantity="other">این نسخه‌ی پشتیبان %1$d اسنیپت سراسری هم دارد.</item>
+    </plurals>
+    <plurals name="backup_preview_transcripts">
+        <item quantity="one">این نسخه‌ی پشتیبان %1$d رونوشت نشست هم دارد.</item>
+        <item quantity="other">این نسخه‌ی پشتیبان %1$d رونوشت نشست هم دارد.</item>
+    </plurals>
     <string name="field_group">گروه (اختیاری)</string>
     <string name="field_group_hint">مثلاً کاری</string>
     <string name="field_favorite">موردعلاقه</string>
@@ -48,9 +57,15 @@
     <string name="hosts_sort_recently_added">اخیراً اضافه‌شده</string>
     <string name="hosts_filter_all_tags">همهٔ برچسب‌ها</string>
     <string name="hosts_action_select">انتخاب میزبان‌ها</string>
-    <string name="hosts_selected_count">%1$d مورد انتخاب شده است</string>
+    <plurals name="hosts_selected_count">
+        <item quantity="one">%1$d مورد انتخاب شده است</item>
+        <item quantity="other">%1$d مورد انتخاب شده است</item>
+    </plurals>
     <string name="hosts_delete_selected_title">میزبان‌های انتخاب‌شده حذف شوند؟</string>
-    <string name="hosts_delete_selected_body">%1$d میزبان حذف شود؟ اطلاعات ورود و تنظیمات ذخیره‌شدهٔ آن‌ها پاک می‌شود و قابل بازگشت نیست.</string>
+    <plurals name="hosts_delete_selected_body">
+        <item quantity="one">%1$d میزبان حذف شود؟ اطلاعات ورود و تنظیمات ذخیره‌شدهٔ آن‌ها پاک می‌شود و قابل بازگشت نیست.</item>
+        <item quantity="other">%1$d میزبان حذف شود؟ اطلاعات ورود و تنظیمات ذخیره‌شدهٔ آن‌ها پاک می‌شود و قابل بازگشت نیست.</item>
+    </plurals>
     <string name="hosts_no_match">هیچ میزبانی با این جستجو هم‌خوان نیست.</string>
     <string name="hosts_group_ungrouped">بدون گروه</string>
     <string name="hosts_favorite">افزودن به موردعلاقه‌ها</string>
@@ -105,13 +120,22 @@
     <string name="files_sort_type">نوع</string>
     <string name="files_show_hidden">پنهان‌ها</string>
     <string name="files_action_select">انتخاب</string>
-    <string name="files_selected_count">%1$d انتخاب شده</string>
+    <plurals name="files_selected_count">
+        <item quantity="one">%1$d انتخاب شده</item>
+        <item quantity="other">%1$d انتخاب شده</item>
+    </plurals>
     <string name="files_download_selected">دانلود</string>
     <string name="files_bulk_download_needs_folder">دانلود گروهی به پوشه محلی این میزبان نیاز دارد (در محیط میزبان تنظیمش کنید).</string>
     <string name="files_delete_selected_title">موارد انتخاب‌شده حذف شوند؟</string>
-    <string name="files_delete_selected_body">%1$d مورد از سرور حذف می‌شود.</string>
+    <plurals name="files_delete_selected_body">
+        <item quantity="one">%1$d مورد از سرور حذف می‌شود.</item>
+        <item quantity="other">%1$d مورد از سرور حذف می‌شود.</item>
+    </plurals>
     <string name="files_upload_folder">آپلود پوشه</string>
-    <string name="files_queue_more">%1$d مورد دیگر در صف</string>
+    <plurals name="files_queue_more">
+        <item quantity="one">%1$d مورد دیگر در صف</item>
+        <item quantity="other">%1$d مورد دیگر در صف</item>
+    </plurals>
     <string name="files_resume_download">دانلود %1$s در %2$s متوقف شد.</string>
     <string name="files_resume_upload">آپلود %1$s لغو شد و می‌تواند ادامه یابد.</string>
     <string name="files_resume">ادامه</string>
@@ -132,7 +156,10 @@
     <string name="action_copy">کپی</string>
     <string name="settings_scrollback_hint">برای تعیین هر مقداری بزنید. از سشن بعدی اعمال می‌شود.</string>
     <string name="settings_scrollback_estimate">≈ %1$s حافظه</string>
-    <string name="settings_scrollback_bounds">بین %1$d تا %2$d خط.</string>
+    <plurals name="settings_scrollback_bounds">
+        <item quantity="one">بین %1$d تا %2$d خط.</item>
+        <item quantity="other">بین %1$d تا %2$d خط.</item>
+    </plurals>
     <string name="settings_keepalive_misses">قطع اتصال پس از ضربان‌های بی‌پاسخ</string>
     <string name="settings_keepalive_misses_value">%1$d بار پشت سر هم</string>
     <string name="settings_keepalive_misses_hint">خود اپ سرور را امتحان می‌کند؛ بعد از این تعداد امتحان بی‌پاسخ پشت سر هم، به‌جای آویزان‌ماندن روی یک اتصال مرده، قطع می‌کند.</string>
@@ -177,7 +204,10 @@
     <string name="history_import_body">این کار فایل‌های تاریخچه شل شما روی سرور متصل را از یک کانال جدا می‌خواند؛ هیچ چیزی در نشست تایپ نمی‌شود. خطوطی که شبیه راز باشند پالایش می‌شوند و نتیجه فقط روی همین دستگاه برای تکمیل خودکار نگه داشته می‌شود.</string>
     <string name="history_import_confirm">وارد کن</string>
     <string name="history_import_preview_title">بازبینی وارد کردن تاریخچه شل</string>
-    <string name="history_import_preview_body">%1$d دستور از پالایش گذشت. فقط همین خطوط برای تکمیل خودکار روی این دستگاه ذخیره می‌شوند — نخستین آن‌ها:</string>
+    <plurals name="history_import_preview_body">
+        <item quantity="one">%1$d دستور از پالایش گذشت. فقط همین خطوط برای تکمیل خودکار روی این دستگاه ذخیره می‌شوند — نخستین آن‌ها:</item>
+        <item quantity="other">%1$d دستور از پالایش گذشت. فقط همین خطوط برای تکمیل خودکار روی این دستگاه ذخیره می‌شوند — نخستین آن‌ها:</item>
+    </plurals>
     <string name="shake_confirm_disconnect_title">قطع اتصال؟</string>
     <string name="shake_confirm_disconnect_body">لرزش تشخیص داده شد و لرزش برای قطع این نشست تنظیم شده است. اکنون قطع شود؟</string>
     <string name="shake_confirm_clear_title">پاک کردن صفحه؟</string>
@@ -205,10 +235,6 @@
     <string name="desktop_clipboard_hint">متن کلیپ‌بورد برای ارسال</string>
     <string name="desktop_clipboard_send">ارسال</string>
     <string name="app_name">TermBridge</string>
-    <string name="nav_hosts">میزبان‌ها</string>
-    <string name="nav_files">فایل‌ها</string>
-    <string name="nav_commands">دستورها</string>
-    <string name="nav_desktop">دسکتاپ</string>
     <string name="nav_settings">تنظیمات</string>
     <string name="action_back">بازگشت</string>
     <string name="action_add_host">افزودن میزبان</string>
@@ -367,7 +393,10 @@
     <string name="commands_risky_body">این دستور به‌عنوان بالقوه مخرب، امتیازافزا یا اختلال‌زا علامت خورده است. تشخیص ابتکاری است و ممکن است دستورهای خطرناک را از قلم بیندازد، پس پیش از اجرا خودتان دستور را بررسی کنید.</string>
     <string name="commands_risky_reasons_label">چرا علامت خورد:</string>
     <string name="commands_risky_run_anyway">با این حال اجرا کن</string>
-    <string name="commands_sequence_progress">دنباله: گام %1$d از %2$d ارسال شد</string>
+    <plurals name="commands_sequence_progress">
+        <item quantity="one">دنباله: گام %1$d از %2$d ارسال شد</item>
+        <item quantity="other">دنباله: گام %1$d از %2$d ارسال شد</item>
+    </plurals>
     <string name="commands_sequence_stopped">دنباله پس از گام %1$d از %2$d متوقف شد. گام‌های ارسال‌شده روی سرور همچنان در حال اجرا می‌مانند.</string>
     <string name="commands_session_buttons_title">دکمه‌های دستور این میزبان</string>
     <string name="commands_session_buttons_note">«درج» متن را بدون اجرا در پایانه می‌گذارد. «اجرا» آن را به پایانه زنده می‌فرستد. تا «اجرا» یا «درج» را لمس نکنید هیچ چیز اجرا نمی‌شود.</string>
@@ -475,15 +504,6 @@
     <string name="advanced_blocked_socks_auth">پروکسی SOCKS احرازهویت‌دار</string>
     <string name="advanced_blocked_socks_auth_reason">احراز هویت SOCKS به Authenticator سراسری JVM نیاز دارد که اطلاعات ورود را میان اتصال‌ها نشت می‌دهد.</string>
     <string name="desktop_title">دسکتاپ راه‌دور</string>
-    <string name="desktop_body">دسکتاپ راه‌دور مشروط است، وعده داده نشده است. RDP با دروازه اثبات مرحله 12 مسدود است: هنوز هیچ اتصال RDP نشان داده نشده است. VNC هسته پروتکل دارد اما هنوز نشستی ندارد: هرگز به یک سرور VNC واقعی وصل نشده است. برای وضعیت دقیق و این‌که چه چیز هر کدام را باز می‌کند ردیف‌های زیر را ببینید.</string>
-    <string name="desktop_rdp">ویندوز (RDP)</string>
-    <string name="desktop_rdp_blocked">با دروازه اثبات مفهوم مرحله 12 مسدود است: هنوز هیچ اتصال RDP نشان داده نشده است. FreeRDP تنها نامزد است، اما کتابخانه اندرویدی ندارد — کد بومی‌اش باید با NDK اندروید از منبع ساخته شود و این محیط نه NDK دارد، نه ساخت CI و نه نقطه پایانی ویندوزی برای آزمون.</string>
-    <string name="desktop_rdp_library">نامزد: FreeRDP 3.x، فعالانه نگهداری‌شونده، با پورت اندرویدی که در نسخه‌های اخیر به‌روز شده است. هسته‌اش Apache-2.0 است؛ فهرست کامل مجوز اجزای دقیق پیوندشده هنوز باز است و هنگام یکپارچه‌سازی باید از درخت منبع FreeRDP بیاید.</string>
-    <string name="desktop_rdp_unblock">چه چیز بازش می‌کند: دستگاه CI دارای NDK که کتابخانه‌های بومی FreeRDP را برای ABIهای هدف بسازد، فهرست مجوز اجزای دقیق پیوندشده، و یک اتصال واقعی به نقطه پایانی ویندوزی سازگار — Pro، Enterprise یا Education با دسکتاپ راه‌دور فعال. ویندوز Home نمی‌تواند میزبان نشست دسکتاپ راه‌دور باشد.</string>
-    <string name="desktop_vnc">لینوکس (VNC)</string>
-    <string name="desktop_vnc_core">هسته پروتکل پیاده‌سازی شده، نشست هنوز در دسترس نیست: یک هسته کارخواه RFB خالص کاتلین در برنامه هست — نسخه‌های پروتکل 3.3، 3.7 و 3.8، بدون احراز هویت و احراز هویت VNC، و رمزگشایی فریم‌بافر Raw، CopyRect، RRE، CoRRE و Hextile — با آزمون‌های واحد برای منطق پروتکل. هرگز به یک سرور VNC واقعی وصل نشده است.</string>
-    <string name="desktop_vnc_blocked">با دروازه اثبات مفهوم مرحله 13 برای نشست مسدود است: بسته پیش از یکپارچه‌سازی کامل، اتصال اثبات‌شده به سرور سازگار کنترل‌شده می‌خواهد و این محیط نه سرور VNC لینوکس کنترل‌شده دارد، نه دستگاه و نه اجرای CI برای اثبات. رمزنگاری‌های Tight، ZRLE، TRLE و احراز هویت رمزنگاری‌شده (VeNCrypt، TLS، X.509) پیاده‌سازی نشده‌اند و تمیز رد می‌شوند، هرگز بی‌صدا تنزل نمی‌کنند. خود احراز هویت VNC ذاتاً ضعیف است و باید فقط در شبکه مطمئن یا از راه تونل SSH استفاده شود.</string>
-    <string name="desktop_vnc_unblock">چه چیز بازش می‌کند: یک سرور VNC لینوکس کنترل‌شده (مثلاً TigerVNC یا x11vnc) با نسخه، احراز هویت و رمزنگاری‌های مستند، یک اتصال واقعی از ساخت دستگاه که دست‌دهی، احراز هویت و به‌روزرسانی‌های فریم‌بافر را سرتاسری اثبات کند، و صفحه نشستی با مقیاس‌بندی، ورودی اشاره‌گر و صفحه‌کلید — تازه آن‌گاه دکمه اتصال.</string>
     <string name="backup_title">وارد کردن / صادر کردن</string>
     <string name="action_backup">وارد کردن / صادر کردن</string>
     <string name="backup_intro">میزبان‌ها را با یک فایل پشتیبان میان دستگاه‌ها جابه‌جا کنید. فقط یک قالب پشتیبانی می‌شود: پشتیبان TermBridge (JSON، نسخه 1). فایل‌های دیگر، از جمله فایل‌های PuTTY، رد می‌شوند.</string>
@@ -510,7 +530,10 @@
     <string name="backup_replace_checkbox">میزبان‌های موجود فهرست‌شده در بالا جایگزین شوند</string>
     <string name="backup_replace_note">بدون این گزینه، میزبان‌های متعارض رد می‌شوند و میزبان‌های موجود دست‌نخورده می‌مانند. با آن، میزبان موجود و دکمه‌ها، تنظیمات و تونل‌هایش جایگزین می‌شوند — اما اطلاعات ورودش فقط وقتی جایگزین می‌شود که این پشتیبان اطلاعاتی داشته باشد.</string>
     <string name="backup_replace_title">میزبان‌های موجود جایگزین شوند؟</string>
-    <string name="backup_replace_body">این کار %1$d میزبان موجود را جایگزین می‌کند. اطلاعات ورود فقط وقتی جایگزین می‌شود که این پشتیبان اطلاعاتی داشته باشد؛ در غیر این صورت اطلاعات ورود موجود می‌ماند.</string>
+    <plurals name="backup_replace_body">
+        <item quantity="one">این کار %1$d میزبان موجود را جایگزین می‌کند. اطلاعات ورود فقط وقتی جایگزین می‌شود که این پشتیبان اطلاعاتی داشته باشد؛ در غیر این صورت اطلاعات ورود موجود می‌ماند.</item>
+        <item quantity="other">این کار %1$d میزبان موجود را جایگزین می‌کند. اطلاعات ورود فقط وقتی جایگزین می‌شود که این پشتیبان اطلاعاتی داشته باشد؛ در غیر این صورت اطلاعات ورود موجود می‌ماند.</item>
+    </plurals>
     <string name="backup_replace_confirm">جایگزینی</string>
     <string name="backup_import_apply">وارد کردن</string>
     <string name="backup_result_title">نتیجه وارد کردن</string>
@@ -518,8 +541,6 @@
     <string name="backup_result_replaced">جایگزین شد: %1$s.</string>
     <string name="backup_result_skipped">رد شد (از قبل بود): %1$s.</string>
     <string name="settings_title">تنظیمات</string>
-    <string name="settings_note">تنظیماتی که رفتار را تغییر می‌دهند همراه ویژگی‌هایی می‌آیند که کنترلشان می‌کنند. فعلاً این صفحه فقط به عیب‌یابی و اطلاعات درباره می‌رسد و برنامه از پوسته سیستم پیروی می‌کند.</string>
-    <string name="settings_secure_note">اسکرین‌شات و ضبط صفحه در این برنامه مسدود است، پس محتوای پایانه نمی‌تواند در نمای برنامه‌های اخیر ظاهر شود. یعنی خودتان هم نمی‌توانید از برنامه اسکرین‌شات بگیرید.</string>
     <string name="diagnostics_title">عیب‌یابی</string>
     <string name="diagnostics_app_version">نسخه برنامه: 0.1.0-foundation</string>
     <string name="diagnostics_no_sessions">نشست‌های فعال: هیچ</string>
@@ -527,7 +548,10 @@
     <string name="terminal_ctrl_d">Ctrl-D</string>
     <string name="terminal_key_tab">Tab</string>
     <string name="terminal_key_esc">Esc</string>
-    <string name="terminal_jump_to_latest">پرش به تازه‌ترین (%1$d خط جدید)</string>
+    <plurals name="terminal_jump_to_latest">
+        <item quantity="one">پرش به تازه‌ترین (%1$d خط جدید)</item>
+        <item quantity="other">پرش به تازه‌ترین (%1$d خط جدید)</item>
+    </plurals>
     <string name="terminal_output_description">خروجی ترمینال</string>
     <string name="session_live_indicator">نشست زنده — بازگشت به پایانه</string>
     <string name="diagnostics_device">دستگاه: %1$s %2$s</string>
@@ -559,14 +583,20 @@
     <string name="settings_font_size">اندازه قلم</string>
     <string name="settings_font_size_value">%1$d sp</string>
     <string name="settings_scrollback">بافر اسکرول‌بک</string>
-    <string name="settings_scrollback_value">%1$d خط</string>
+    <plurals name="settings_scrollback_value">
+        <item quantity="one">%1$d خط</item>
+        <item quantity="other">%1$d خط</item>
+    </plurals>
     <string name="settings_terminal_type">نوع پایانه</string>
     <string name="settings_terminal_type_hint">برای چرخش لمس کنید. در اتصال بعدی اعمال می‌شود.</string>
     <string name="settings_keep_screen_on">روشن نگه داشتن صفحه در پایانه</string>
     <string name="settings_keep_screen_on_hint">وقتی پایانه باز است از خوابیدن نمایشگر جلوگیری می‌کند.</string>
     <string name="settings_keepalive">بازه زنده‌نگه‌داشتن</string>
     <string name="settings_keepalive_off">خاموش</string>
-    <string name="settings_keepalive_value">%1$d ثانیه</string>
+    <plurals name="settings_keepalive_value">
+        <item quantity="one">%1$d ثانیه</item>
+        <item quantity="other">%1$d ثانیه</item>
+    </plurals>
     <string name="settings_keepalive_hint">ضربان می‌فرستد تا اتصال‌های بیکار قطع نشوند. در اتصال بعدی اعمال می‌شود.</string>
     <string name="settings_block_screenshots">مسدود کردن اسکرین‌شات و ضبط صفحه</string>
     <string name="settings_block_screenshots_hint">محتوای پایانه را از اسکرین‌شات و پیش‌نمایش برنامه‌های اخیر پنهان می‌کند.</string>
@@ -614,7 +644,10 @@
     <string name="logs_outcome_failed">ناموفق</string>
     <string name="logs_outcome_closed">نشست پایان یافت (%1$s)</string>
     <string name="discover_scan">اسکن شبکه</string>
-    <string name="discover_scanning">در حال اسکن %1$d از %2$d نشانی…</string>
+    <plurals name="discover_scanning">
+        <item quantity="one">در حال اسکن %1$d از %2$d نشانی…</item>
+        <item quantity="other">در حال اسکن %1$d از %2$d نشانی…</item>
+    </plurals>
     <string name="discover_hint">فقط در زیرشبکه محلی شما دنبال SSH (22)، VNC (5900) و RDP (3389) می‌گردد.</string>
     <string name="discover_none">در این شبکه چیزی پیدا نشد.</string>
     <string name="discover_no_network">نشانی شبکه محلی در دسترس نیست. ابتدا به وای‌فای وصل شوید.</string>
@@ -626,13 +659,15 @@
     <string name="lock_pin_hint">پین</string>
     <string name="lock_unlock">باز کردن قفل</string>
     <string name="lock_wrong">پین اشتباه است.</string>
-    <string name="lock_throttled">تلاش‌های زیادی شد. %1$d ثانیه دیگر دوباره تلاش کنید.</string>
+    <plurals name="lock_throttled">
+        <item quantity="one">تلاش‌های زیادی شد. %1$d ثانیه دیگر دوباره تلاش کنید.</item>
+        <item quantity="other">تلاش‌های زیادی شد. %1$d ثانیه دیگر دوباره تلاش کنید.</item>
+    </plurals>
     <string name="lock_use_biometric">استفاده از اثرانگشت یا چهره</string>
     <string name="lock_biometric_title">باز کردن قفل TermBridge</string>
     <string name="settings_section_lock">قفل برنامه</string>
     <string name="settings_pin_lock">قفل برنامه</string>
     <string name="settings_pin_lock_on">روشن. پس از تأخیر قفل خودکار زیر دوباره پرسیده می‌شود.</string>
-    <string name="settings_pin_lock_off">خاموش</string>
     <string name="settings_pin_lock_note">کاربران گذری را از گوشی بازشده دور نگه می‌دارد. اطلاعات ورود ذخیره‌شده در هر حال با کلیدخانه اندروید رمزنگاری شده‌اند.</string>
     <string name="settings_biometric">باز کردن با اثرانگشت / چهره</string>
     <string name="settings_biometric_unavailable">روی این دستگاه در دسترس نیست، یا چیزی ثبت نشده است.</string>
@@ -705,12 +740,30 @@
     <string name="files_error_open_destination">باز کردن فایل مقصد ممکن نشد.</string>
     <string name="files_error_download_failed">دانلود ناموفق بود. لطفاً دوباره تلاش کنید.</string>
     <string name="files_info_workdir_fallback">پوشهٔ کاری در دسترس نیست — از ریشه شروع شد.</string>
-    <string name="files_info_deleted">%1$d مورد حذف شد.</string>
-    <string name="files_info_deleted_partial">%1$d مورد حذف شد؛ %2$d مورد حذف نشد.</string>
-    <string name="files_info_queued_downloads">%1$d دانلود در صف قرار گرفت.</string>
-    <string name="files_info_queued_uploads">%1$d بارگذاری در صف قرار گرفت.</string>
-    <string name="files_info_queued_uploads_skipped">%1$d بارگذاری در صف قرار گرفت؛ %2$d مورد رد شد (نام از پیش وجود دارد).</string>
-    <string name="files_info_queued_uploads_folder">%1$d بارگذاری از پوشه در صف قرار گرفت.</string>
+    <plurals name="files_info_deleted">
+        <item quantity="one">%1$d مورد حذف شد.</item>
+        <item quantity="other">%1$d مورد حذف شد.</item>
+    </plurals>
+    <plurals name="files_info_deleted_partial">
+        <item quantity="one">%1$d مورد حذف شد؛ %2$d مورد حذف نشد.</item>
+        <item quantity="other">%1$d مورد حذف شد؛ %2$d مورد حذف نشد.</item>
+    </plurals>
+    <plurals name="files_info_queued_downloads">
+        <item quantity="one">%1$d دانلود در صف قرار گرفت.</item>
+        <item quantity="other">%1$d دانلود در صف قرار گرفت.</item>
+    </plurals>
+    <plurals name="files_info_queued_uploads">
+        <item quantity="one">%1$d بارگذاری در صف قرار گرفت.</item>
+        <item quantity="other">%1$d بارگذاری در صف قرار گرفت.</item>
+    </plurals>
+    <plurals name="files_info_queued_uploads_skipped">
+        <item quantity="one">%1$d بارگذاری در صف قرار گرفت؛ %2$d مورد رد شد (نام از پیش وجود دارد).</item>
+        <item quantity="other">%1$d بارگذاری در صف قرار گرفت؛ %2$d مورد رد شد (نام از پیش وجود دارد).</item>
+    </plurals>
+    <plurals name="files_info_queued_uploads_folder">
+        <item quantity="one">%1$d بارگذاری از پوشه در صف قرار گرفت.</item>
+        <item quantity="other">%1$d بارگذاری از پوشه در صف قرار گرفت.</item>
+    </plurals>
     <string name="session_error_terminal_start">ترمینال روی این اتصال شروع به کار نکرد.</string>
     <string name="session_shell_closed">سرور شل را بست.</string>
     <string name="session_connection_lost">اتصال قطع شد.</string>
@@ -718,8 +771,14 @@
     <string name="history_import_needs_session">وارد کردن تاریخچهٔ شل به یک نشست فعال نیاز دارد.</string>
     <string name="history_import_running">در حال وارد کردن تاریخچهٔ شل…</string>
     <string name="history_import_failed">وارد کردن تاریخچهٔ شل ناموفق بود.</string>
-    <string name="history_import_done">%1$d دستور تازه وارد شد (%2$d خط قابل استفاده خوانده شد).</string>
-    <string name="backup_error_passphrase_too_short">عبارت عبور باید دست‌کم %1$d نویسه باشد.</string>
+    <plurals name="history_import_done">
+        <item quantity="one">%1$d دستور تازه وارد شد (%2$d خط قابل استفاده خوانده شد).</item>
+        <item quantity="other">%1$d دستور تازه وارد شد (%2$d خط قابل استفاده خوانده شد).</item>
+    </plurals>
+    <plurals name="backup_error_passphrase_too_short">
+        <item quantity="one">عبارت عبور باید دست‌کم %1$d نویسه باشد.</item>
+        <item quantity="other">عبارت عبور باید دست‌کم %1$d نویسه باشد.</item>
+    </plurals>
     <string name="backup_error_passphrase_mismatch">عبارت‌های عبور با هم یکی نیستند.</string>
     <string name="backup_error_create_failed">ساختن خروجی ممکن نشد.</string>
     <string name="backup_error_save_failed">ذخیرهٔ خروجی ممکن نشد.</string>

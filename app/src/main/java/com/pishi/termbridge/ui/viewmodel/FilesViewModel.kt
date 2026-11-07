@@ -584,10 +584,13 @@ class FilesViewModel(
             clearSelection()
             _uiState.value = _uiState.value.copy(
                 infoMessage = if (failed == 0) {
-                    UiMessage.of(R.string.files_info_deleted, targets.size)
+                    UiMessage.ofPlural(
+                        R.plurals.files_info_deleted, targets.size, targets.size
+                    )
                 } else {
-                    UiMessage.of(
-                        R.string.files_info_deleted_partial,
+                    UiMessage.ofPlural(
+                        R.plurals.files_info_deleted_partial,
+                        targets.size - failed,
                         targets.size - failed, failed
                     )
                 }
@@ -684,7 +687,9 @@ class FilesViewModel(
             }
             clearSelection()
             _uiState.value = _uiState.value.copy(
-                infoMessage = UiMessage.of(R.string.files_info_queued_downloads, queued)
+                infoMessage = UiMessage.ofPlural(
+                    R.plurals.files_info_queued_downloads, queued, queued
+                )
             )
         }
     }
@@ -769,11 +774,13 @@ class FilesViewModel(
         }
         _uiState.value = _uiState.value.copy(
             infoMessage = if (skipped > 0) {
-                UiMessage.of(
-                    R.string.files_info_queued_uploads_skipped, queued, skipped
+                UiMessage.ofPlural(
+                    R.plurals.files_info_queued_uploads_skipped, queued, queued, skipped
                 )
             } else {
-                UiMessage.of(R.string.files_info_queued_uploads, queued)
+                UiMessage.ofPlural(
+                    R.plurals.files_info_queued_uploads, queued, queued
+                )
             }
         )
     }
@@ -838,7 +845,9 @@ class FilesViewModel(
                 queued++
             }
             _uiState.value = _uiState.value.copy(
-                infoMessage = UiMessage.of(R.string.files_info_queued_uploads_folder, queued)
+                infoMessage = UiMessage.ofPlural(
+                    R.plurals.files_info_queued_uploads_folder, queued, queued
+                )
             )
         }
     }
