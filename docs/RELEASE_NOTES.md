@@ -25,6 +25,15 @@ see below).
 > (done 2026-11-08: CI run #83 green, Signed Release run #4,
 > APK independently verified against the release keystore).
 >
+> **Update (2026-11-08, design port):** version
+> `0.1.4-foundation` (versionCode 5) — the app UI now
+> follows the owner's Penpot template "04 FAQ Blue Cards"
+> (UI Studies — 14 Pages): palette #A9C6E2 / #24344E /
+> #2B3D5A / #31445F / #3D5878 / #2F7DE1 / #A9BAD3 applied
+> to both Material schemes, shapes moved to the template's
+> radii (rows 12dp, cards 16dp), and a matching built-in
+> "Blue Cards" terminal theme added. No behaviour change.
+>
 > **Update (2026-11-08, owner-requested features):** version
 > `0.1.3-foundation` (versionCode 4) — updates now download
 > and install in-app (ApkDownloader; SHA-256 checked against

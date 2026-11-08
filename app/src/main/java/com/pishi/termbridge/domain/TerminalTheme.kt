@@ -70,6 +70,17 @@ object TerminalThemes {
             0xFF75715E, 0xFFF92672, 0xFFA6E22E, 0xFFF4BF75, 0xFF66D9EF, 0xFFAE81FF, 0xFFA1EFE4, 0xFFF9F8F5
         )
     )
+    // The terminal companion of the app's "04 FAQ Blue Cards"
+    // UI theme (owner's Penpot template, 2026-11-08): navy
+    // ground, white text, the template's bright blue family.
+    val BLUE_CARDS = TerminalTheme(
+        id = "blue-cards", label = "Blue Cards",
+        background = 0xFF24344E, foreground = 0xFFFFFFFF, cursor = 0xFF2F7DE1,
+        ansi = listOf(
+            0xFF31445F, 0xFFFF6B6B, 0xFF4CC38A, 0xFFF5C15C, 0xFF2F7DE1, 0xFFC792EA, 0xFF4FC3D9, 0xFFFFFFFF,
+            0xFF3D5878, 0xFFFF8A80, 0xFF69DBA0, 0xFFFFD97A, 0xFF6FA8EC, 0xFFDDB4F5, 0xFF7ADBE8, 0xFFFFFFFF
+        )
+    )
     val HIGH_CONTRAST = TerminalTheme(
         id = "high-contrast", label = "High contrast",
         background = 0xFF000000, foreground = 0xFFFFFFFF, cursor = 0xFFFFFF00,
@@ -79,7 +90,7 @@ object TerminalThemes {
         )
     )
     val all: List<TerminalTheme> = listOf(
-        CLASSIC, SOLARIZED, LIGHT, DRACULA, NORD, GRUVBOX, MONOKAI, HIGH_CONTRAST
+        CLASSIC, SOLARIZED, LIGHT, DRACULA, NORD, GRUVBOX, MONOKAI, BLUE_CARDS, HIGH_CONTRAST
     )
     fun byId(id: String): TerminalTheme = all.firstOrNull { it.id == id } ?: CLASSIC
 
