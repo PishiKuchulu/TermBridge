@@ -33,15 +33,7 @@ class FakeSecretCrypto : SecretCrypto {
 
     override fun decrypt(blob: ByteArray, context: String): ByteArray {
         return if (isLegacyBlob(blob)) {
-            require(blob.size > 12) { "Blob too short." }
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-                init(
-                    Cipher.DECRYPT_MODE,
-                    key,
-                    GCMParameterSpec(128, blob.copyOfRange(0, 12))
-                )
-            }
-            cipher.doFinal(blob.copyOfRange(12, blob.size))
+            decryptLegacy(blob)
         } else {
             require(blob.size > 13) { "Blob too short." }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
@@ -52,8 +44,34 @@ class FakeSecretCrypto : SecretCrypto {
                 )
                 updateAAD(context.toByteArray(Charsets.UTF_8))
             }
-            cipher.doFinal(blob.copyOfRange(13, blob.size))
+            try {
+                cipher.doFinal(blob.copyOfRange(13, blob.size))
+            } catch (e: javax.crypto.AEADBadTagException) {
+                // Mirror of the production fallback (audit #6
+                // TB-009): a legacy blob whose random IV starts
+                // with 0x02 is routed to the v2 path by the
+                // first-byte check and can never authenticate
+                // there. Without this fallback the double
+                // fails the migration tests once in ~256 runs
+                // (CI run #86, 2026-11-08); the legacy layout
+                // is AES-GCM too, so a genuine v2 blob still
+                // fails both paths and nothing is weakened.
+                decryptLegacy(blob)
+            }
         }
+    }
+
+    /** Pre-R-02 layout: IV || ciphertext, no AAD. */
+    private fun decryptLegacy(blob: ByteArray): ByteArray {
+        require(blob.size > 12) { "Blob too short." }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(
+                Cipher.DECRYPT_MODE,
+                key,
+                GCMParameterSpec(128, blob.copyOfRange(0, 12))
+            )
+        }
+        return cipher.doFinal(blob.copyOfRange(12, blob.size))
     }
 
     override fun deleteKey() {
@@ -65,6 +83,22 @@ class FakeSecretCrypto : SecretCrypto {
      *  can seed legacy rows the owning repository can read. */
     fun legacyEncrypt(plaintext: ByteArray): ByteArray {
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        return legacyEncryptWithIv(plaintext, iv)
+    }
+
+    /** Same as [legacyEncrypt] but with a chosen first IV
+     *  byte, so a test can deterministically seed the
+     *  1-in-256 case where the legacy IV starts with the
+     *  v2 version byte (0x02). */
+    fun legacyEncryptWithFirstIvByte(plaintext: ByteArray, firstByte: Byte): ByteArray {
+        val iv = ByteArray(12).also {
+            SecureRandom().nextBytes(it)
+            it[0] = firstByte
+        }
+        return legacyEncryptWithIv(plaintext, iv)
+    }
+
+    private fun legacyEncryptWithIv(plaintext: ByteArray, iv: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
             init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
         }

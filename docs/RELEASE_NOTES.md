@@ -30,6 +30,11 @@ see below).
 > accordion section titles (and their chevrons) render
 > white (`onSurface`) instead of the bright-blue
 > primary, at the owner's request. No behaviour change.
+> (CI run #86 then caught a 1-in-256 flake in the
+> legacy-blob migration test — the test double lacked
+> the AEAD fallback production already had since audit
+> #6 TB-009; fixed in the double with a deterministic
+> 0x02-IV regression test, same version.)
 >
 > **Update (2026-11-08, design port):** version
 > `0.1.4-foundation` (versionCode 5) — the app UI now

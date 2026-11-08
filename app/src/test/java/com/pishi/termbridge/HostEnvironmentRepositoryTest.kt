@@ -6,6 +6,7 @@ import com.pishi.termbridge.domain.EnvApplyResult
 import com.pishi.termbridge.domain.HostEnvironmentSettings
 import com.pishi.termbridge.domain.RemoteShell
 import com.pishi.termbridge.domain.wipe
+import com.pishi.termbridge.security.SecretCrypto
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
@@ -212,6 +213,39 @@ class HostEnvironmentRepositoryTest {
             row.copy(
                 valueBlob =
                     crypto.legacyEncrypt("top-secret-value".toByteArray(Charsets.UTF_8))
+            )
+        )
+        val loaded = repo.loadEnvVarsForConnection(1L)
+        assertTrue(loaded.undecryptableNames.isEmpty())
+        assertArrayEquals(
+            "top-secret-value".toByteArray(), loaded.values.single().value
+        )
+        loaded.values.forEach { it.value.wipe() }
+        val upgraded = envDao.rawRowsForHost(1L).single().valueBlob
+        assertFalse(crypto.isLegacyBlob(upgraded))
+    }
+
+    @Test
+    fun legacyBlobWithVersionByteIvStillMigratesOnLoad() = runTest {
+        // CI run #86 (2026-11-08) failed the test above once:
+        // a legacy blob whose random IV starts with 0x02 is
+        // routed to the v2 path by the first-byte check
+        // (p = 1/256) and, without the AEAD fallback, the load
+        // marks the value undecryptable. Seed that exact IV
+        // deterministically so the fallback is pinned, not
+        // left to chance.
+        val settingsDao = FakeHostSettingsDao()
+        val envDao = FakeHostEnvVarDao()
+        val crypto = FakeSecretCrypto()
+        val repo = HostEnvironmentRepository(settingsDao, envDao, crypto)
+        repo.saveEnvVar(1L, 0L, "API_TOKEN", "top-secret-value".toCharArray())
+        val row = envDao.rawRowsForHost(1L).single()
+        envDao.update(
+            row.copy(
+                valueBlob = crypto.legacyEncryptWithFirstIvByte(
+                    "top-secret-value".toByteArray(Charsets.UTF_8),
+                    SecretCrypto.BLOB_VERSION_2
+                )
             )
         )
         val loaded = repo.loadEnvVarsForConnection(1L)

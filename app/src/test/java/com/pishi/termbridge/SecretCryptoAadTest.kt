@@ -57,7 +57,12 @@ class SecretCryptoAadTest {
 
     @Test
     fun legacyBlobStillDecrypts() {
-        val legacy = (crypto as FakeSecretCrypto).legacyEncrypt(secret)
+        // Fixed first IV byte (not 0x02): the classifier
+        // check below is about the legacy layout, and a
+        // random IV would start with the v2 version byte
+        // once in ~256 runs.
+        val legacy = (crypto as FakeSecretCrypto)
+            .legacyEncryptWithFirstIvByte(secret, 0x07)
         assertTrue(crypto.isLegacyBlob(legacy))
         // The legacy path ignores the context (there was none).
         assertArrayEquals(secret, crypto.decrypt(legacy, BlobContexts.hostCredential(7)))
