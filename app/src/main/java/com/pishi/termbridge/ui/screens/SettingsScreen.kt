@@ -546,7 +546,9 @@ private fun AccordionSection(
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary
+            // Owner's call (2026-11-08): section titles read
+            // white, not the bright-blue primary.
+            color = MaterialTheme.colorScheme.onSurface
         )
         Icon(
             imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
@@ -557,7 +559,7 @@ private fun AccordionSection(
                     R.string.settings_expand_section
                 }
             ),
-            tint = MaterialTheme.colorScheme.primary
+            tint = MaterialTheme.colorScheme.onSurface
         )
     }
     if (expanded) {

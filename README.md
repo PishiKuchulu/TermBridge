@@ -9,7 +9,7 @@ import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
 **Status: signed releases ship from this tree.** Version
-`0.1.4-foundation` (versionCode 5), database v11. CI went
+`0.1.5-foundation` (versionCode 6), database v11. CI went
 green for the first time on 2026-10-25 (run #13: unit tests
 + debug assemble + emulator instrumented tests). Since then:
 the 9-phase security remediation and the review-2 fix wave
@@ -21,11 +21,13 @@ v0.1.1 were published from tags (signature verified against
 the release keystore); v0.1.2 — the audit #7 fix wave —
 followed the same way, as did v0.1.3 (in-app update
 download + install, SHA-256-verified against the release
-digest when GitHub provides one). This tree carries
-0.1.4: the app UI is re-skinned to the owner's Penpot
+digest when GitHub provides one). Version 0.1.4
+re-skinned the app UI to the owner's Penpot
 template "04 FAQ Blue Cards" (deep-navy cards, bright
 blue #2F7DE1, card radius 16 / row radius 12), with a
-matching "Blue Cards" terminal theme. Still
+matching "Blue Cards" terminal theme; 0.1.5 makes the
+Settings section titles white at the owner's request.
+Still
 open: on-device verification
 runs and tier-2 integration tests. See
 `docs/RELEASE_NOTES.md` for the release gates.
