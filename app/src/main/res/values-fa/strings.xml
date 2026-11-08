@@ -576,6 +576,12 @@
     <string name="update_download_action">دانلود به‌روزرسانی</string>
     <string name="update_unverified_note">ترم‌بریج نمی‌تواند فایل دانلودشده را راستی‌آزمایی کند. فقط اگر به منبع اعتماد دارید نصبش کنید.</string>
     <string name="update_check_failed">بررسی به‌روزرسانی ممکن نشد. بعداً دوباره تلاش کنید.</string>
+    <string name="update_downloading">در حال دانلود به‌روزرسانی…</string>
+    <string name="update_download_failed">دانلود به‌روزرسانی ناموفق بود. دوباره تلاش کنید.</string>
+    <string name="update_install_action">نصب به‌روزرسانی</string>
+    <string name="update_ready">به‌روزرسانی دانلود شد و آمادهٔ نصب است.</string>
+    <string name="update_verified_note">دانلود راستی‌آزمایی شد: هش SHA-256 فایل با هش ریلیز یکی است.</string>
+    <string name="update_digest_mismatch">فایل دانلودشده با هش ریلیز یکی نبود و حذف شد.</string>
     <string name="settings_clear_history">پاک کردن تاریخچهٔ فرمان‌ها</string>
     <string name="settings_clear_history_title">تاریخچهٔ فرمان‌ها پاک شود؟</string>
     <string name="settings_clear_history_body">همهٔ فرمان‌های به‌یادسپرده‌شده برای تکمیل خودکار از این دستگاه حذف می‌شود. این کار بازگشت‌پذیر نیست.</string>

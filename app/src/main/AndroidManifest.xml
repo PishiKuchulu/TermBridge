@@ -6,6 +6,11 @@
          foreground-service permission is granted in advance. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- In-app update (0.1.3): lets the system installer open
+         the APK the app downloaded itself. The system still
+         gates the actual install behind the per-app
+         "unknown apps" allowance. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".TermBridgeApplication"
@@ -29,5 +34,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Shares the downloaded update APK with the system
+             installer, and nothing else (cache updates/ only). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

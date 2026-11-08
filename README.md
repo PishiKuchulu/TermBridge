@@ -9,7 +9,7 @@ import/export. Phone-first, no mandatory cloud account, no
 root, no AI features.
 
 **Status: signed releases ship from this tree.** Version
-`0.1.2-foundation` (versionCode 3), database v11. CI went
+`0.1.3-foundation` (versionCode 4), database v11. CI went
 green for the first time on 2026-10-25 (run #13: unit tests
 + debug assemble + emulator instrumented tests). Since then:
 the 9-phase security remediation and the review-2 fix wave
@@ -18,9 +18,13 @@ Termius-parity phases added settings/themes, Vault
 navigation, an app lock and a VNC screen (see
 `docs/PARITY_PHASES.md`), and signed releases v0.1.0 /
 v0.1.1 were published from tags (signature verified against
-the release keystore); v0.1.2 — the audit #7 fix wave — is
-prepared in this tree and publishes the same way once its
-tag is cut. Still open: on-device verification
+the release keystore); v0.1.2 — the audit #7 fix wave —
+followed the same way. This tree carries 0.1.3: in-app
+update download + install (the APK is fetched by the app
+and handed to the system installer, SHA-256-verified
+against the release digest when GitHub provides one) and
+a Settings accordion that also closes on re-tap. Still
+open: on-device verification
 runs and tier-2 integration tests. See
 `docs/RELEASE_NOTES.md` for the release gates.
 
@@ -135,7 +139,7 @@ tests skip via Assume.
 
 ## Permissions, privacy, security
 
-- Permissions: INTERNET + ACCESS_NETWORK_STATE in the app manifest, plus USE_BIOMETRIC and USE_FINGERPRINT contributed to the merged manifest by the AndroidX biometric library for the optional app lock (verified against the biometric 1.1.0 library manifest, 2026-11-04).
+- Permissions: INTERNET + ACCESS_NETWORK_STATE + REQUEST_INSTALL_PACKAGES (the last one only lets the system installer open the update APK the app downloaded; the install itself stays behind the system's per-app allowance) in the app manifest, plus USE_BIOMETRIC and USE_FINGERPRINT contributed to the merged manifest by the AndroidX biometric library for the optional app lock (verified against the biometric 1.1.0 library manifest, 2026-11-04).
   `allowBackup=false` (export is the migration path);
   cleartext traffic forbidden; one exported activity
   (the launcher) and one exported receiver contributed by

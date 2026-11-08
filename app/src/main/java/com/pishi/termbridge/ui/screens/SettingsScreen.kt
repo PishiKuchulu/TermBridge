@@ -1,8 +1,10 @@
 package com.pishi.termbridge.ui.screens
 
 import android.content.Intent
+import java.io.File
 import java.util.Locale
-import android.net.Uri
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -50,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import com.pishi.termbridge.R
 import com.pishi.termbridge.domain.AppSettings
 import com.pishi.termbridge.domain.AppSettingsRules
+import com.pishi.termbridge.domain.ApkDownloadResult
+import com.pishi.termbridge.domain.ApkDownloader
 import com.pishi.termbridge.domain.AppUpdateChecker
 import com.pishi.termbridge.domain.GitHubLatestReleaseFetcher
 import com.pishi.termbridge.domain.LockMethod
@@ -95,7 +99,9 @@ fun SettingsScreen(
     // 5 App update). Tapping a collapsed header expands it and
     // collapses the others; the expanded header is inert, so
     // exactly one section is open at all times.
-    var expandedSection by rememberSaveable { mutableStateOf(0) }
+    // Accordion: exactly one section open at a time, and
+    // tapping the open section closes it (null = all closed).
+    var expandedSection by rememberSaveable { mutableStateOf<Int?>(0) }
     LaunchedEffect(historyJustCleared) {
         if (historyJustCleared) {
             delay(3_000)
@@ -132,7 +138,7 @@ fun SettingsScreen(
         AccordionSection(
             title = stringResource(R.string.settings_section_terminal),
             expanded = expandedSection == 0,
-            onToggle = { expandedSection = 0 }
+            onToggle = { expandedSection = if (expandedSection == 0) null else 0 }
         ) {
             StepperRow(
                 title = stringResource(R.string.settings_font_size),
@@ -352,7 +358,7 @@ fun SettingsScreen(
         AccordionSection(
             title = stringResource(R.string.settings_section_session),
             expanded = expandedSection == 1,
-            onToggle = { expandedSection = 1 }
+            onToggle = { expandedSection = if (expandedSection == 1) null else 1 }
         ) {
             ChoiceRow(
                 title = stringResource(R.string.settings_keepalive),
@@ -397,7 +403,7 @@ fun SettingsScreen(
         AccordionSection(
             title = stringResource(R.string.settings_section_lock),
             expanded = expandedSection == 2,
-            onToggle = { expandedSection = 2 }
+            onToggle = { expandedSection = if (expandedSection == 2) null else 2 }
         ) {
             LockSection(lock)
         }
@@ -405,7 +411,7 @@ fun SettingsScreen(
         AccordionSection(
             title = stringResource(R.string.settings_section_security),
             expanded = expandedSection == 3,
-            onToggle = { expandedSection = 3 }
+            onToggle = { expandedSection = if (expandedSection == 3) null else 3 }
         ) {
             SwitchRow(
                 title = stringResource(R.string.settings_block_screenshots),
@@ -418,7 +424,7 @@ fun SettingsScreen(
         AccordionSection(
             title = stringResource(R.string.settings_section_data),
             expanded = expandedSection == 4,
-            onToggle = { expandedSection = 4 }
+            onToggle = { expandedSection = if (expandedSection == 4) null else 4 }
         ) {
             LinkRow(stringResource(R.string.action_backup), onBackup)
             LinkRow(stringResource(R.string.action_diagnostics), onDiagnostics)
@@ -429,7 +435,7 @@ fun SettingsScreen(
         AccordionSection(
             title = stringResource(R.string.settings_section_update),
             expanded = expandedSection == 5,
-            onToggle = { expandedSection = 5 }
+            onToggle = { expandedSection = if (expandedSection == 5) null else 5 }
         ) {
             AppUpdateBlock()
         }
@@ -563,14 +569,23 @@ private sealed interface UpdateUiState {
     data object Idle : UpdateUiState
     data object Checking : UpdateUiState
     data class Done(val result: UpdateCheckResult) : UpdateUiState
+    data class Downloading(val downloaded: Long, val total: Long) : UpdateUiState
+    data class ReadyToInstall(val filePath: String, val verified: Boolean) :
+        UpdateUiState
+    data object DownloadFailed : UpdateUiState
+    data object DigestMismatch : UpdateUiState
 }
 
 /**
  * The App update section body: the running version (read from
  * PackageManager, never hardcoded), a manual check button and
- * its result. Manual only — no background polling — and an
- * available update is offered as a browser download link; the
- * app holds no install permission and never fetches the APK.
+ * its result. Manual only — no background polling. Since
+ * 0.1.3 an available update downloads in-app and is handed to
+ * the system installer (the owner's ask); when the release
+ * payload carries the asset's SHA-256 digest, the download is
+ * verified against it before install, and a mismatch deletes
+ * the file and refuses. The system still owns the install
+ * prompt and the unknown-apps allowance.
  */
 @Composable
 private fun AppUpdateBlock() {
@@ -622,29 +637,107 @@ private fun AppUpdateBlock() {
                 UpdateStatusText(
                     stringResource(R.string.update_available, result.tag)
                 )
-                // Audit #6 TB-012: the download is a plain
-                // browser hand-off with no hash or signature
-                // check on our side; say so where the user
-                // acts on it.
-                UpdateStatusText(
-                    stringResource(R.string.update_unverified_note)
-                )
+                if (result.expectedSha256 == null) {
+                    // Audit #6 TB-012: no digest in the payload
+                    // means the download cannot be hash-verified
+                    // on our side; say so where the user acts.
+                    // (With a digest, ApkDownloader verifies it
+                    // and a mismatch is refused below.)
+                    UpdateStatusText(
+                        stringResource(R.string.update_unverified_note)
+                    )
+                }
                 LinkRow(
                     title = stringResource(R.string.update_download_action),
                     onClick = {
-                        try {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(result.downloadUrl))
-                            )
-                        } catch (_: Exception) {
-                            // No browser to open it with — the
-                            // version line above still tells
-                            // the user an update exists.
+                        val dest = File(
+                            context.cacheDir,
+                            "updates/TermBridge-release.apk"
+                        )
+                        updateState = UpdateUiState.Downloading(0, -1)
+                        scope.launch {
+                            val download = withContext(Dispatchers.IO) {
+                                ApkDownloader().download(
+                                    result.downloadUrl,
+                                    dest,
+                                    result.expectedSha256
+                                ) { downloaded, total ->
+                                    updateState = UpdateUiState.Downloading(
+                                        downloaded, total
+                                    )
+                                }
+                            }
+                            updateState = when (download) {
+                                is ApkDownloadResult.Done ->
+                                    UpdateUiState.ReadyToInstall(
+                                        dest.absolutePath,
+                                        download.digestVerified
+                                    )
+                                ApkDownloadResult.DigestMismatch ->
+                                    UpdateUiState.DigestMismatch
+                                ApkDownloadResult.TooLarge,
+                                ApkDownloadResult.Failed ->
+                                    UpdateUiState.DownloadFailed
+                            }
                         }
                     }
                 )
             }
         }
+        is UpdateUiState.Downloading -> {
+            UpdateStatusText(stringResource(R.string.update_downloading))
+            if (state.total > 0) {
+                LinearProgressIndicator(
+                    progress = {
+                        (state.downloaded.toFloat() / state.total)
+                            .coerceIn(0f, 1f)
+                    },
+                    modifier = Modifier.padding(horizontal = Spacing.medium)
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.padding(horizontal = Spacing.medium)
+                )
+            }
+            UpdateStatusText(formatBytesShort(state.downloaded))
+        }
+        is UpdateUiState.ReadyToInstall -> {
+            UpdateStatusText(stringResource(R.string.update_ready))
+            if (state.verified) {
+                UpdateStatusText(stringResource(R.string.update_verified_note))
+            } else {
+                UpdateStatusText(stringResource(R.string.update_unverified_note))
+            }
+            LinkRow(
+                title = stringResource(R.string.update_install_action),
+                onClick = {
+                    try {
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            File(state.filePath)
+                        )
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW)
+                                .setDataAndType(
+                                    uri,
+                                    "application/vnd.android.package-archive"
+                                )
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (_: Exception) {
+                        // No installer could be opened — the
+                        // downloaded file stays cached and the
+                        // row can be tapped again.
+                    }
+                }
+            )
+        }
+        UpdateUiState.DownloadFailed ->
+            UpdateStatusText(stringResource(R.string.update_download_failed))
+        UpdateUiState.DigestMismatch ->
+            UpdateStatusText(stringResource(R.string.update_digest_mismatch))
     }
 }
 

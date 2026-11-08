@@ -19,10 +19,12 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * The signed-release workflow publishes exactly one APK asset
  * per release, named [APK_ASSET_NAME]; the check looks for
- * that asset and hands its download URL back, so the UI can
- * offer it as a plain browser download. Installing stays a
- * system flow — the app holds no install permission and never
- * downloads the APK itself.
+ * that asset and hands its download URL back. Since 0.1.3 the
+ * UI downloads the APK in-app ([ApkDownloader]) and hands it
+ * to the system installer — and when the release payload
+ * carries the asset's SHA-256 digest, the download is
+ * verified against it before install (the audit #6 TB-012
+ * hand-off had no such binding; the digest closes it).
  *
  * The repository is public, so the unauthenticated call
  * needs no credential. Any failure along the way (offline,
@@ -32,9 +34,15 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 sealed interface UpdateCheckResult {
     /** A strictly newer release exists; [tag] is its raw tag
-     *  (e.g. "v0.2.0") and [downloadUrl] the APK asset URL. */
-    data class UpdateAvailable(val tag: String, val downloadUrl: String) :
-        UpdateCheckResult
+     *  (e.g. "v0.2.0") and [downloadUrl] the APK asset URL.
+     *  [expectedSha256] is the asset digest from the release
+     *  payload when GitHub provides one (lowercase hex,
+     *  no prefix); null when the payload carries none. */
+    data class UpdateAvailable(
+        val tag: String,
+        val downloadUrl: String,
+        val expectedSha256: String? = null
+    ) : UpdateCheckResult
 
     /** The running version is at least as new as the newest
      *  published release. */
@@ -194,10 +202,29 @@ object AppUpdateChecker {
             ?.jsonPrimitive?.contentOrNull
             ?.takeIf { it.isNotBlank() }
             ?: return UpdateCheckResult.CheckFailed
+        val expectedSha256 = parseAssetDigest(
+            apk.jsonObject["digest"]?.jsonPrimitive?.contentOrNull
+        )
         return if (isNewer(currentVersion, tag)) {
-            UpdateCheckResult.UpdateAvailable(tag, downloadUrl)
+            UpdateCheckResult.UpdateAvailable(tag, downloadUrl, expectedSha256)
         } else {
             UpdateCheckResult.UpToDate
+        }
+    }
+
+    /**
+     * Normalizes a GitHub asset `digest` value ("sha256:<hex>",
+     * any case) to bare lowercase hex, or null when the value
+     * is absent or not a well-formed SHA-256 digest — a
+     * malformed digest must degrade to "unverified", never to
+     * a crash or a false match.
+     */
+    fun parseAssetDigest(raw: String?): String? {
+        val hex = raw?.trim()?.removePrefix("sha256:")?.lowercase()
+            ?: return null
+        return hex.takeIf {
+            it.length == 64 &&
+                it.all { c -> c in '0'..'9' || c in 'a'..'f' }
         }
     }
 

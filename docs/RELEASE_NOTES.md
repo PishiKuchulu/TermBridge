@@ -21,7 +21,16 @@ see below).
 > hardening, a capped update-check response read, monotonic
 > lock throttling, pluralized count strings, backup
 > extraction rules — are in this tree with their tests; the
-> signed v0.1.2 release publishes from its tag when cut.
+> signed v0.1.2 release publishes from its tag when cut
+> (done 2026-11-08: CI run #83 green, Signed Release run #4,
+> APK independently verified against the release keystore).
+>
+> **Update (2026-11-08, owner-requested features):** version
+> `0.1.3-foundation` (versionCode 4) — updates now download
+> and install in-app (ApkDownloader; SHA-256 checked against
+> the release asset digest when present, mismatch deleted
+> and refused), and the Settings accordion closes when its
+> open section is tapped again. Database stays v11.
 
 This tree is a **handoff, not a release**. No APK, no
 source ZIP, and no SHA-256 release hash is produced

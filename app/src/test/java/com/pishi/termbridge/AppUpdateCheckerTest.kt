@@ -104,6 +104,54 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun assetDigestIsCarriedIntoUpdateAvailable() {
+        val hex = "ab12cd34" + "ef56ab78".repeat(7)
+        val payload = releasePayload("v0.2.0").replace(
+            "\"content_type\": \"application/vnd.android.package-archive\",",
+            "\"content_type\": \"application/vnd.android.package-archive\",\n" +
+                "              \"digest\": \"sha256:${hex.uppercase()}\","
+        )
+        val result = AppUpdateChecker.evaluate("0.1.0-foundation", payload)
+        assertEquals(
+            UpdateCheckResult.UpdateAvailable(
+                tag = "v0.2.0",
+                downloadUrl =
+                    "https://github.com/PishiKuchulu/TermBridge/releases/download/v0.2.0/TermBridge-release.apk",
+                expectedSha256 = hex
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun missingDigestLeavesUpdateUnverified() {
+        val result = AppUpdateChecker.evaluate(
+            "0.1.0-foundation", releasePayload("v0.2.0")
+        )
+        assertTrue(result is UpdateCheckResult.UpdateAvailable)
+        assertEquals(
+            null,
+            (result as UpdateCheckResult.UpdateAvailable).expectedSha256
+        )
+    }
+
+    @Test
+    fun assetDigestParsingIsStrict() {
+        val hex = "0123456789abcdef".repeat(4)
+        assertEquals(hex, AppUpdateChecker.parseAssetDigest("sha256:$hex"))
+        assertEquals(
+            hex,
+            AppUpdateChecker.parseAssetDigest("sha256:${hex.uppercase()}")
+        )
+        assertEquals(hex, AppUpdateChecker.parseAssetDigest(hex))
+        assertEquals(null, AppUpdateChecker.parseAssetDigest(null))
+        assertEquals(null, AppUpdateChecker.parseAssetDigest(""))
+        assertEquals(null, AppUpdateChecker.parseAssetDigest("sha512:$hex"))
+        assertEquals(null, AppUpdateChecker.parseAssetDigest("sha256:xyz"))
+        assertEquals(null, AppUpdateChecker.parseAssetDigest("sha256:${hex.dropLast(1)}"))
+    }
+
+    @Test
     fun sameReleaseIsUpToDate() {
         assertEquals(
             UpdateCheckResult.UpToDate,

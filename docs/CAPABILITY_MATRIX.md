@@ -31,7 +31,7 @@ evidence that exists for it, and gives it exactly one status.
 - `BLOCKED` — the pack's proof gate failed; no implementation
   is offered, and a blocker report exists instead.
 
-Test counts recount by grep (2026-11-08, audit #7 fix wave): 546 JVM
+Test counts recount by grep (2026-11-08, in-app update wave): 554 JVM
 `@Test` methods — all run and pass in CI and in the local
 harness — and 30 instrumented `@Test` methods across
 `KeystoreAndRoomTest`, `MainActivitySmokeTest`,

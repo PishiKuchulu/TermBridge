@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths: ONLY the in-app update download
+     directory is shareable, and only with the system
+     installer via a per-intent URI grant. -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>
