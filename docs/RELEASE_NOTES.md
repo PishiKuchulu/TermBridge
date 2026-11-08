@@ -25,6 +25,14 @@ see below).
 > (done 2026-11-08: CI run #83 green, Signed Release run #4,
 > APK independently verified against the release keystore).
 >
+> **Update (2026-11-08, owner icon swap):** version
+> `0.1.6-foundation` (versionCode 7) — the launcher icon
+> is the owner's new artwork (cream cloud + `>_` glyph on
+> a dark-teal field; adaptive background #092727), replacing
+> the gradient icon. This release also carries the 0.1.5
+> white Settings titles below, which never shipped separately.
+> No behaviour change.
+>
 > **Update (2026-11-08, owner tweak):** version
 > `0.1.5-foundation` (versionCode 6) — the Settings
 > accordion section titles (and their chevrons) render

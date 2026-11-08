@@ -157,7 +157,7 @@ file and refuses the install.
 
 Signed releases **v0.1.0 – v0.1.4** are published from this
 tree (signature verified against the release keystore). The
-tree currently carries `0.1.5-foundation` (versionCode 6)
+tree currently carries `0.1.6-foundation` (versionCode 7)
 and database v11. CI runs unit tests (**555 JVM tests**),
 debug assemble and lint on every push, plus an emulator
 instrumented job (30 tests: 28 passed, 2 VNC tests skipped)
@@ -268,7 +268,7 @@ Biometric 1.1.0. The About screen lists the same set.
 
 ### 📊 وضعیت پروژه
 
-ریلیزهای امضاشدهٔ **v0.1.0 تا v0.1.4** از همین درخت منتشر شده‌اند (امضا در برابر کلید انتشار راستی‌آزمایی شده است). درخت فعلی نسخهٔ `0.1.5-foundation` (کد نسخه ۶) و پایگاه دادهٔ نسخهٔ ۱۱ را دارد. در CI برای هر پوش، تست‌های واحد (**۵۵۵ تست JVM**)، بیلد دیباگ و لینت اجرا می‌شوند و جداگانه جاب تست اینسترومنتد روی شبیه‌ساز (۳۰ تست: ۲۸ قبول و ۲ تست VNC ردشده) و جاب پروتکل x11vnc هم هست. صادقانه باز است: اجراهای راستی‌آزمایی روی دستگاه واقعی و تست‌های یکپارچهٔ ردهٔ ۲؛ دروازه‌های انتشار در `docs/RELEASE_NOTES.md` آمده‌اند.
+ریلیزهای امضاشدهٔ **v0.1.0 تا v0.1.4** از همین درخت منتشر شده‌اند (امضا در برابر کلید انتشار راستی‌آزمایی شده است). درخت فعلی نسخهٔ `0.1.6-foundation` (کد نسخه ۷) و پایگاه دادهٔ نسخهٔ ۱۱ را دارد. در CI برای هر پوش، تست‌های واحد (**۵۵۵ تست JVM**)، بیلد دیباگ و لینت اجرا می‌شوند و جداگانه جاب تست اینسترومنتد روی شبیه‌ساز (۳۰ تست: ۲۸ قبول و ۲ تست VNC ردشده) و جاب پروتکل x11vnc هم هست. صادقانه باز است: اجراهای راستی‌آزمایی روی دستگاه واقعی و تست‌های یکپارچهٔ ردهٔ ۲؛ دروازه‌های انتشار در `docs/RELEASE_NOTES.md` آمده‌اند.
 
 ### 🛠️ بیلد
 

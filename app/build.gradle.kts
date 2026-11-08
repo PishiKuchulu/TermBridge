@@ -16,8 +16,8 @@ android {
         applicationId = "com.pishi.termbridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.1.5-foundation"
+        versionCode = 7
+        versionName = "0.1.6-foundation"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
