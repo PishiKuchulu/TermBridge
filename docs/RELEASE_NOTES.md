@@ -25,6 +25,16 @@ see below).
 > (done 2026-11-08: CI run #83 green, Signed Release run #4,
 > APK independently verified against the release keystore).
 >
+> **Update (2026-11-09, icon safe-zone fix):** version
+> `0.1.7-foundation` (versionCode 8) — the 0.1.6 icon
+> artwork filled the whole adaptive canvas, so launcher
+> masks cropped the cloud's edges on device (owner
+> report). The glyph is now composited at 55% of the
+> canvas over the same dark-teal field (rebuilt as a
+> radial-gradient fit from the artwork's clean pixels),
+> fully inside the adaptive safe zone; verified against
+> circle and squircle mask simulations. No other change.
+>
 > **Update (2026-11-08, owner icon swap):** version
 > `0.1.6-foundation` (versionCode 7) — the launcher icon
 > is the owner's new artwork (cream cloud + `>_` glyph on
